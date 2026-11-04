@@ -89,6 +89,28 @@ extension Budget {
         amount.map { $0 + transferred(in: interval) + carryIn(to: interval) }
     }
 
+    /// Days from `date` to the end of `interval`, counting that day; nil unless `date` is in the period.
+    func daysLeft(in interval: DateInterval, on date: Date = .now, calendar: Calendar = .current) -> Int? {
+        guard date >= interval.start, date < interval.end else { return nil }
+        return calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: interval.end).day
+    }
+
+    /// What was left at the end of yesterday split over the days left (today included), rounded down;
+    /// spending today doesn't change it. 0 once overspent. Nil for budgets without an amount and for
+    /// periods `date` isn't in.
+    func dailyAvailable(in interval: DateInterval, on date: Date = .now, calendar: Calendar = .current) -> Double? {
+        guard let available = available(in: interval),
+              let days = daysLeft(in: interval, on: date, calendar: calendar), days > 0 else { return nil }
+        let today = calendar.startOfDay(for: date)
+        let before = entries(in: interval).filter { $0.date < today }.reduce(0) { $0 - $1.signedAmount }
+        return max(((available - before) / Double(days)).rounded(.down), 0)
+    }
+
+    /// Spent on `date` within the period.
+    func spentToday(in interval: DateInterval, on date: Date = .now, calendar: Calendar = .current) -> Double {
+        entries(in: interval).filter { calendar.isDate($0.date, inSameDayAs: date) }.reduce(0) { $0 - $1.signedAmount }
+    }
+
     var currentInterval: DateInterval { interval(containing: .now) }
     var currentSpent: Double { spent(in: currentInterval) }
     var remaining: Double? { available(in: currentInterval).map { $0 - currentSpent } }

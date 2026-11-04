@@ -20,6 +20,7 @@ struct BackupFile: Codable {
         var customStart: Date, customEnd: Date, isPinned: Bool, isArchived: Bool, sortOrder: Int
         // Optional so backups made before carry-over existed still decode.
         var carriesOver: Bool?, carryOverspend: Bool?, carryOverStart: Date?
+        var showsDaily: Bool?
     }
     struct RuleDTO: Codable {
         var id: UUID, categoryID: UUID?, budgetID: UUID, days: String
@@ -64,7 +65,8 @@ struct BackupFile: Codable {
             BudgetDTO(id: $0.id, name: $0.name, symbol: $0.symbol, amount: $0.amount, period: $0.periodRaw,
                       anchorDay: $0.anchorDay, customStart: $0.customStart, customEnd: $0.customEnd,
                       isPinned: $0.isPinned, isArchived: $0.isArchived, sortOrder: $0.sortOrder,
-                      carriesOver: $0.carriesOver, carryOverspend: $0.carryOverspend, carryOverStart: $0.carryOverStart)
+                      carriesOver: $0.carriesOver, carryOverspend: $0.carryOverspend, carryOverStart: $0.carryOverStart,
+                      showsDaily: $0.showsDaily)
         }
         budgetAdjustments = try context.fetch(FetchDescriptor<BudgetAdjustment>()).map {
             AdjustmentDTO(id: $0.id, transferID: $0.transferID, amount: $0.amount, date: $0.date, note: $0.note,
@@ -152,6 +154,7 @@ struct BackupFile: Codable {
             m.carriesOver = b.carriesOver ?? false
             m.carryOverspend = b.carryOverspend ?? true
             m.carryOverStart = b.carryOverStart
+            m.showsDaily = b.showsDaily ?? false
             context.insert(m)
             budgetMap[b.id] = m
         }

@@ -150,6 +150,12 @@ final class BudgetAppUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["$550"].waitForExistence(timeout: 5), "lunch not reduced")
         XCTAssertTrue(app.staticTexts["$1,450"].exists, "Dinner not increased")
         snapshot("n4-budgets")
+        // How the amount adds up shows on the detail page only.
+        let breakdown = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH '本期 '")).firstMatch
+        XCTAssertFalse(breakdown.exists, "breakdown shown in the list")
+        app.staticTexts["lunch"].firstMatch.tap()
+        XCTAssertTrue(breakdown.waitForExistence(timeout: 5), "breakdown missing on the detail page")
+        app.navigationBars.buttons.firstMatch.tap()
 
         // Delete it from the transfer history; both budgets go back.
         app.buttons["轉移紀錄"].tap()
@@ -393,6 +399,43 @@ final class BudgetAppUITests: XCTestCase {
         choose("淺色主題 天空")
         choose("深色主題 夜空")
         app.navigationBars.buttons.firstMatch.tap()
+    }
+
+    func testDailyBudgetOption() {
+        app.buttons["預算"].firstMatch.tap()
+        addBudget("Dinner", amount: "1250")
+
+        // Only the budget with the option turned on shows it.
+        app.buttons["新增預算"].tap()
+        let field = app.textFields["名稱，例如 午餐"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap(); field.typeText("lunch")
+        let amountField = app.textFields["金額"]
+        amountField.tap(); amountField.typeText("700")
+        app.buttons["每週"].tap()
+        let toggle = app.switches["顯示每日可用"]
+        if !toggle.isHittable { app.swipeUp() }
+        toggle.switches.firstMatch.tap()
+        app.buttons["儲存"].tap()
+
+        let daily = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH '今日 '"))
+        XCTAssertTrue(daily.firstMatch.waitForExistence(timeout: 5), "daily amount not shown")
+        XCTAssertEqual(daily.count, 1, "shown on a budget without the option")
+        let before = daily.firstMatch.label
+        XCTAssertTrue(before.hasPrefix("今日 0 / "), before)
+
+        // Spending today fills today's bar without changing today's amount.
+        app.buttons["記一筆"].firstMatch.tap()
+        app.buttons["category-食物"].tap()
+        closeKeyboard()
+        let chips = app.buttons.matching(NSPredicate(format: "label ENDSWITH '預算' OR label == 'Dinner' OR label == 'lunch'"))
+        chips.firstMatch.tap()
+        app.buttons["lunch"].firstMatch.tap()
+        press("3", "5", "✓")
+        // Same day's amount, only what's used changes.
+        let after = app.staticTexts[before.replacingOccurrences(of: "今日 0 /", with: "今日 35 /")]
+        XCTAssertTrue(after.waitForExistence(timeout: 5), "today's usage not updated, or today's amount changed")
+        snapshot("d1-daily")
     }
 
     func testCancelFromKeyboard() {

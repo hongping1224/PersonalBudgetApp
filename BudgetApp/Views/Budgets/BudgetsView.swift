@@ -50,6 +50,7 @@ struct BudgetsView: View {
 
 struct BudgetRow: View {
     let budget: Budget
+    /// The period to show on the detail page; nil is the current period in the budget list.
     var interval: DateInterval?
 
     var body: some View {
@@ -77,7 +78,11 @@ struct BudgetRow: View {
                     BudgetBar(fraction: available > 0 ? spent / available : 1, timeFraction: period.elapsedFraction)
                 }
                 HStack {
-                    Text(period.shortLabel)
+                    if interval == nil, let today = todayText(in: period) {
+                        today
+                    } else {
+                        Text(period.shortLabel)
+                    }
                     Spacer()
                     if let available {
                         Text(Money.plain(spent)).foregroundStyle(spent > available ? Color.expense : .secondary)
@@ -86,7 +91,11 @@ struct BudgetRow: View {
                 }
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
-                if let amount = budget.amount, carry != 0 || moved != 0 {
+                if interval != nil, let today = todayText(in: period) {
+                    today.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }
+                // The list stays short; how the amount adds up is on the detail page.
+                if interval != nil, let amount = budget.amount, carry != 0 || moved != 0 {
                     let parts = ["本期 \(Money.plain(amount))"]
                         + (carry != 0 ? ["上期結轉 \(Money.string(carry, signed: true))"] : [])
                         + (moved != 0 ? ["轉移 \(Money.string(moved, signed: true))"] : [])
@@ -97,6 +106,15 @@ struct BudgetRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    /// "今日 35 / 140" when the budget shows its daily amount and the period is the current one.
+    private func todayText(in period: DateInterval) -> Text? {
+        guard budget.showsDaily, let daily = budget.dailyAvailable(in: period) else { return nil }
+        let used = budget.spentToday(in: period)
+        return Text("今日 ")
+            + Text(Money.plain(used)).foregroundColor(used > daily ? .expense : .secondary)
+            + Text(" / \(Money.plain(daily))")
     }
 }
 
@@ -401,6 +419,7 @@ struct BudgetEditor: View {
     @State private var carriesOver = false
     @State private var carryOverspend = true
     @State private var carryOverStart = Date.now
+    @State private var showsDaily = false
     @State private var confirmDelete = false
 
     var body: some View {
@@ -433,6 +452,13 @@ struct BudgetEditor: View {
                     case .custom:
                         DatePicker("開始", selection: $customStart, displayedComponents: .date)
                         DatePicker("結束", selection: $customEnd, in: customStart..., displayedComponents: .date)
+                    }
+                }
+                if hasAmount {
+                    Section {
+                        Toggle("顯示每日可用", isOn: $showsDaily)
+                    } footer: {
+                        Text("每天可用 = 到昨天為止剩下的預算 ÷ 剩下的天數（含今天），顯示成「今日 已用 / 可用」。")
                     }
                 }
                 if hasAmount && period != .custom {
@@ -491,6 +517,7 @@ struct BudgetEditor: View {
         isArchived = budget.isArchived
         carriesOver = budget.carriesOver
         carryOverspend = budget.carryOverspend
+        showsDaily = budget.showsDaily
         // Default to the previous period so turning it on has an effect right away.
         carryOverStart = budget.carryOverStart ?? budget.interval(offset: -1).start
     }
@@ -513,6 +540,7 @@ struct BudgetEditor: View {
         target.carriesOver = carriesOver && target.amount != nil && period != .custom
         target.carryOverspend = carryOverspend
         target.carryOverStart = carriesOver ? carryOverStart : nil
+        target.showsDaily = showsDaily && target.amount != nil
         try? context.save()
         dismiss()
     }

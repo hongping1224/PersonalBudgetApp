@@ -49,6 +49,38 @@ final class BudgetAppTests: XCTestCase {
         XCTAssertEqual(b.interval(offset: -1, from: date(2026, 10, 27)).start, date(2026, 10, 19, 0))
     }
 
+    func testDailyAvailable() {
+        // Weekly from Monday: 2026/10/26 – 11/1.
+        let b = Budget(name: "lunch", amount: 750, period: .weekly, anchorDay: 2)
+        context.insert(b)
+        context.insert(Entry(kind: .expense, amount: 125, date: date(2026, 10, 26), budget: b))
+        try? context.save()
+        let tuesday = date(2026, 10, 27)
+        let week = b.interval(containing: tuesday)
+
+        XCTAssertEqual(b.daysLeft(in: week, on: tuesday), 6)
+        XCTAssertEqual(b.dailyAvailable(in: week, on: tuesday), 104)            // 625 / 6, rounded down
+        XCTAssertEqual(b.spentToday(in: week, on: tuesday), 0)
+        XCTAssertEqual(b.dailyAvailable(in: week, on: date(2026, 11, 1)), 625)  // last day
+        XCTAssertNil(b.dailyAvailable(in: week, on: date(2026, 11, 2)))         // period is over
+
+        // Spending today fills today's bar but doesn't change today's amount; tomorrow's does.
+        context.insert(Entry(kind: .expense, amount: 300, date: tuesday.addingTimeInterval(3600), budget: b))
+        try? context.save()
+        XCTAssertEqual(b.dailyAvailable(in: week, on: tuesday), 104)
+        XCTAssertEqual(b.spentToday(in: week, on: tuesday), 300)
+        XCTAssertEqual(b.dailyAvailable(in: week, on: date(2026, 10, 28)), 65)  // 325 / 5
+
+        // Overspent by yesterday.
+        context.insert(Entry(kind: .expense, amount: 900, date: tuesday.addingTimeInterval(3600), budget: b))
+        try? context.save()
+        XCTAssertEqual(b.dailyAvailable(in: week, on: date(2026, 10, 28)), 0)
+
+        let tracker = Budget(name: "work", amount: nil, period: .monthly)
+        context.insert(tracker)
+        XCTAssertNil(tracker.dailyAvailable(in: tracker.interval(containing: tuesday), on: tuesday))
+    }
+
     func testBudgetSpentCountsRefunds() {
         let b = Budget(name: "lunch", amount: 750, period: .weekly, anchorDay: 2)
         context.insert(b)
@@ -354,6 +386,7 @@ final class BudgetAppTests: XCTestCase {
         budget.carriesOver = true
         budget.carryOverspend = false
         budget.carryOverStart = date(2026, 10, 1)
+        budget.showsDaily = true
         EntryService.add(kind: .expense, amount: 120, name: "便當", category: lunch, account: wallet, budget: budget, in: context)
 
         let data = try BackupFile.encoder.encode(try BackupFile(context: context))
@@ -367,6 +400,7 @@ final class BudgetAppTests: XCTestCase {
         XCTAssertEqual(entries.first?.budget?.carriesOver, true)
         XCTAssertEqual(entries.first?.budget?.carryOverspend, false)
         XCTAssertEqual(entries.first?.budget?.carryOverStart, date(2026, 10, 1))
+        XCTAssertEqual(entries.first?.budget?.showsDaily, true)
         XCTAssertEqual(entries.first?.account?.name, "錢包")
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<EntryCategory>()), Seed.expenseCategories.count + Seed.incomeCategories.count)
     }

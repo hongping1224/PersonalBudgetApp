@@ -152,6 +152,8 @@ final class Budget {
     /// When false, overspending is forgiven instead of reducing the next period.
     var carryOverspend: Bool = true
     var carryOverStart: Date?
+    /// Show the amount usable per day, with a bar for today, on this budget's row.
+    var showsDaily: Bool = false
 
     @Relationship(deleteRule: .nullify, inverse: \Entry.budget)
     var entries: [Entry]? = []
