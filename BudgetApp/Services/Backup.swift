@@ -31,6 +31,9 @@ struct BackupFile: Codable {
         var id: UUID, transferID: UUID, amount: Double, date: Date, note: String
         var budgetID: UUID?, counterpartName: String
     }
+    struct CheckDTO: Codable {
+        var id: UUID, date: Date, accountID: UUID, balance: Double
+    }
     struct EntryDTO: Codable {
         var id: UUID, kind: String, amount: Double, date: Date, name: String, note: String
         var currency: String, createdAt: Date
@@ -48,6 +51,8 @@ struct BackupFile: Codable {
     var budgetAdjustments: [AdjustmentDTO]?
     /// Optional so backups made before budget rules existed still decode.
     var budgetRules: [RuleDTO]?
+    /// 對帳打卡; optional so older backups still decode.
+    var balanceChecks: [CheckDTO]?
     var entries: [EntryDTO]
 
     @MainActor
@@ -73,6 +78,9 @@ struct BackupFile: Codable {
         budgetAdjustments = try context.fetch(FetchDescriptor<BudgetAdjustment>()).map {
             AdjustmentDTO(id: $0.id, transferID: $0.transferID, amount: $0.amount, date: $0.date, note: $0.note,
                           budgetID: $0.budget?.id, counterpartName: $0.counterpartName)
+        }
+        balanceChecks = try context.fetch(FetchDescriptor<BalanceCheck>()).map {
+            CheckDTO(id: $0.id, date: $0.date, accountID: $0.accountID, balance: $0.balance)
         }
         budgetRules = try context.fetch(FetchDescriptor<BudgetRule>()).map {
             RuleDTO(id: $0.id, categoryID: $0.categoryID, budgetID: $0.budgetID, days: $0.daysRaw,
@@ -116,6 +124,14 @@ struct BackupFile: Codable {
                 let m = BudgetRule(categoryID: r.categoryID, budgetID: r.budgetID, days: RuleDays(rawValue: r.days) ?? .everyday,
                                    startMinute: r.startMinute, endMinute: r.endMinute, sortOrder: r.sortOrder)
                 m.id = r.id
+                context.insert(m)
+            }
+        }
+        if let balanceChecks {
+            try context.fetch(FetchDescriptor<BalanceCheck>()).forEach(context.delete)
+            for c in balanceChecks {
+                let m = BalanceCheck(accountID: c.accountID, date: c.date, balance: c.balance)
+                m.id = c.id
                 context.insert(m)
             }
         }

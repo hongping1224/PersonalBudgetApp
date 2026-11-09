@@ -78,6 +78,13 @@ private struct MonthContent: View {
 
     @Environment(\.modelContext) private var context
     @Query private var entries: [Entry]
+    @Query private var checks: [BalanceCheck]
+    @Query private var accounts: [Account]
+    /// +1 when the day just moved forward, so the records slide in from the right.
+    @State private var dayDirection = 1
+    /// A sideways swipe over the records is under way (or just ended): lifting the finger on a
+    /// record then isn't a tap that opens it.
+    @State private var swipingDay = false
 
     init(month: Date, selectedDay: Binding<Date>, editing: Binding<Entry?>, visibleMonth: Binding<Date?>) {
         self.month = month
@@ -89,6 +96,12 @@ private struct MonthContent: View {
         let end = cal.date(byAdding: .month, value: 1, to: start)!
         _entries = Query(filter: #Predicate<Entry> { $0.date >= start && $0.date < end },
                          sort: [SortDescriptor(\Entry.date, order: .reverse), SortDescriptor(\Entry.createdAt, order: .reverse)])
+        _checks = Query(filter: #Predicate<BalanceCheck> { $0.date >= start && $0.date < end },
+                        sort: \BalanceCheck.date, order: .reverse)
+    }
+
+    private var dayChecks: [BalanceCheck] {
+        checks.filter { Calendar.current.isDate($0.date, inSameDayAs: selectedDay) }
     }
 
     private var dayEntries: [Entry] {
@@ -128,26 +141,75 @@ private struct MonthContent: View {
                 .padding(.top, 8)
                 .padding(.bottom, 12)
 
-                HStack {
-                    Text(selectedDay.dayTitle)
-                    Spacer()
-                    let spent = dayEntries.filter { $0.kind == .expense }.reduce(0) { $0 + $1.baseAmount }
-                    if spent > 0 { Text("支出 \(Money.string(spent))").monospacedDigit() }
-                }
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, Self.margin + 16)
+                // Swipe left or right over the day's records for the next or previous day.
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text(selectedDay.dayTitle)
+                        Spacer()
+                        let spent = dayEntries.filter { $0.kind == .expense }.reduce(0) { $0 + $1.baseAmount }
+                        if spent > 0 { Text("支出 \(Money.string(spent))").monospacedDigit() }
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16)
 
-                dayCard
-                    .padding(.horizontal, Self.margin)
-                    .padding(.bottom, 24)
+                    dayCard
+                        .id(selectedDay)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: dayDirection > 0 ? .trailing : .leading).combined(with: .opacity),
+                            removal: .opacity))
+                }
+                .padding(.horizontal, Self.margin)
+                .padding(.bottom, 24)
+                .frame(maxWidth: .infinity, minHeight: 320, alignment: .top)
+                .contentShape(Rectangle())
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 20)
+                        .onChanged { value in
+                            if abs(value.translation.width) > abs(value.translation.height) { swipingDay = true }
+                        }
+                        .onEnded { value in
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { swipingDay = false }
+                            let w = value.translation.width
+                            guard abs(w) > 60, abs(w) > abs(value.translation.height) * 1.5 else { return }
+                            shiftDay(w < 0 ? 1 : -1)
+                        }
+                )
+                .clipped()
             }
         }
+    }
+
+    /// Moves to the next or previous day, paging the calendar when it's in another month.
+    private func shiftDay(_ delta: Int) {
+        let cal = Calendar.current
+        guard let day = cal.date(byAdding: .day, value: delta, to: selectedDay) else { return }
+        dayDirection = delta
+        withAnimation(.easeOut(duration: 0.22)) { selectedDay = day }
+        let dayMonth = cal.startOfMonth(for: day)
+        if dayMonth != month { withAnimation { visibleMonth = dayMonth } }
     }
 
     /// The selected day's records; long-press one to delete it.
     private var dayCard: some View {
         VStack(spacing: 0) {
+            // 對帳打卡 made this day (a personal note, not a record).
+            ForEach(dayChecks) { check in
+                let account = accounts.first { $0.id == check.accountID }
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.seal.fill").foregroundStyle(BalanceCheck.color)
+                    Text("\(account?.fullName ?? "帳戶") 對帳 \(check.date.formatted(.dateTime.hour().minute()))")
+                    Spacer()
+                    Text(Money.string(check.balance, currency: account?.currency ?? Currency.base)).monospacedDigit()
+                }
+                .font(.subheadline)
+                .foregroundStyle(BalanceCheck.color)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("day-check-in")
+                Divider().padding(.leading, 16)
+            }
             if dayEntries.isEmpty {
                 Text("這天沒有紀錄")
                     .foregroundStyle(.secondary)
@@ -156,7 +218,7 @@ private struct MonthContent: View {
             }
             ForEach(Array(dayEntries.enumerated()), id: \.element.id) { index, entry in
                 if index > 0 { Divider().padding(.leading, 68) }
-                Button { editing = entry } label: {
+                Button { if !swipingDay { editing = entry } } label: {
                     EntryRow(entry: entry)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
@@ -184,6 +246,7 @@ private struct MonthPanel: View {
     let highlighted: Date
 
     @Query private var entries: [Entry]
+    @Query private var checks: [BalanceCheck]
     private let days: [Date]
 
     init(month: Date, selectedDay: Binding<Date>, highlighted: Date) {
@@ -194,6 +257,7 @@ private struct MonthPanel: View {
         let start = days[0]
         let end = days[41].addingTimeInterval(86_400)
         _entries = Query(filter: #Predicate<Entry> { $0.date >= start && $0.date < end })
+        _checks = Query(filter: #Predicate<BalanceCheck> { $0.date >= start && $0.date < end })
     }
 
     /// The 6-week grid shown for `month`, starting on Sunday.
@@ -212,7 +276,8 @@ private struct MonthPanel: View {
         VStack(spacing: 6) {
             Text(month.monthTitle).font(.headline)
             CalendarGrid(month: month, days: days, selectedDay: $selectedDay, highlighted: highlighted,
-                         markedDays: Set(entries.map { cal.startOfDay(for: $0.date) }))
+                         markedDays: Set(entries.map { cal.startOfDay(for: $0.date) }),
+                         checkedDays: Set(checks.map { cal.startOfDay(for: $0.date) }))
             HStack {
                 Label(Money.string(expense), systemImage: "arrow.up.right")
                     .foregroundStyle(Color.expense)
@@ -235,6 +300,8 @@ struct CalendarGrid: View {
     /// The day drawn as selected.
     let highlighted: Date
     let markedDays: Set<Date>
+    /// Days with a 對帳打卡, drawn with a filled circle in the check-in color.
+    var checkedDays: Set<Date> = []
 
     private let cal = Calendar.current
 
@@ -268,6 +335,7 @@ struct CalendarGrid: View {
                     .monospacedDigit()
                     .foregroundStyle(color.opacity(inMonth ? 1 : 0.3))
                     .frame(width: 36, height: 36)
+                    .background(Circle().fill(BalanceCheck.color.opacity(checkedDays.contains(day) ? 0.3 : 0)))
                     .overlay(Circle().stroke(Color.accent, lineWidth: selected ? 2.5 : 0))
                 Circle()
                     .fill(markedDays.contains(day) ? Color.income : .clear)

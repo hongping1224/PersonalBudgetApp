@@ -5,6 +5,8 @@ import Charts
 struct AccountsView: View {
     @Query(sort: \Account.sortOrder) private var accounts: [Account]
     @Query(sort: \Entry.date) private var entries: [Entry]
+    @Query(sort: \BalanceCheck.date, order: .reverse) private var checks: [BalanceCheck]
+    @Environment(\.modelContext) private var context
     @State private var creating = false
     @State private var showArchived = false
     @State private var hideAmounts = false
@@ -77,14 +79,16 @@ struct AccountsView: View {
                                 switch item {
                                 case .single(let account):
                                     NavigationLink { AccountDetailView(account: account) } label: {
-                                        AccountRow(account: account, balance: balances[account.id] ?? 0, masked: hideAmounts)
+                                        AccountRow(account: account, balance: balances[account.id] ?? 0, masked: hideAmounts,
+                                                   checkIn: checkIn(account), checkedToday: checkedToday(account))
                                     }
                                 case .group(let name, let members):
                                     groupRow(name, members: members, type: type)
                                     if !isCollapsed(name, type: type) {
                                         ForEach(members) { account in
                                             NavigationLink { AccountDetailView(account: account) } label: {
-                                                AccountRow(account: account, balance: balances[account.id] ?? 0, masked: hideAmounts)
+                                                AccountRow(account: account, balance: balances[account.id] ?? 0, masked: hideAmounts,
+                                                           checkIn: checkIn(account), checkedToday: checkedToday(account))
                                                     .padding(.leading, 12)
                                             }
                                         }
@@ -139,6 +143,19 @@ struct AccountsView: View {
 
     private func mask(_ s: String) -> String { hideAmounts ? "＊＊＊＊" : s }
 
+    /// 對帳打卡 straight from the list, for cash accounts.
+    private func checkIn(_ account: Account) -> (() -> Void)? {
+        guard account.canCheckBalance else { return nil }
+        return {
+            context.insert(BalanceCheck(account: account))
+            try? context.save()
+        }
+    }
+
+    private func checkedToday(_ account: Account) -> Bool {
+        checks.contains { $0.accountID == account.id && Calendar.current.isDateInToday($0.date) }
+    }
+
     /// Group header with its total; tap to fold its accounts away.
     private func groupRow(_ name: String, members: [Account], type: AccountType) -> some View {
         let total = AccountListItem.total(of: members)
@@ -187,6 +204,9 @@ struct AccountRow: View {
     let account: Account
     let balance: Double
     var masked = false
+    /// Shows a 對帳打卡 button (cash accounts in the list).
+    var checkIn: (() -> Void)? = nil
+    var checkedToday = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -210,6 +230,19 @@ struct AccountRow: View {
                         .background(Color.teal, in: Capsule())
                         .foregroundStyle(.white)
                 }
+            }
+            if let checkIn {
+                // Borderless, so tapping it doesn't also open the account.
+                Button(action: checkIn) {
+                    Image(systemName: checkedToday ? "checkmark.seal.fill" : "checkmark.seal")
+                        .font(.title2)
+                        .foregroundStyle(BalanceCheck.color)
+                        .frame(width: 40, height: 40)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .sensoryFeedback(.success, trigger: checkedToday)
+                .accessibilityLabel(checkedToday ? "今天已對帳 \(account.name)" : "對帳打卡 \(account.name)")
             }
         }
     }

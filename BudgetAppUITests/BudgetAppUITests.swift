@@ -436,6 +436,77 @@ final class BudgetAppUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts[title(0)].waitForExistence(timeout: 3), "arrow did not page")
     }
 
+    func testSwipeRecordsChangesDay() {
+        addExpense(["1", "2", "0"])
+        app.buttons["明細"].firstMatch.tap()
+        let cal = Calendar.current
+        func title(_ days: Int) -> String {
+            let d = cal.date(byAdding: .day, value: days, to: .now)!
+            return String(format: "%04d/%02d/%02d", cal.component(.year, from: d), cal.component(.month, from: d),
+                          cal.component(.day, from: d))
+        }
+        // Swipe across the records area, below the calendar.
+        func swipe(left: Bool) {
+            let a = app.coordinate(withNormalizedOffset: CGVector(dx: left ? 0.85 : 0.15, dy: 0.72))
+            let b = app.coordinate(withNormalizedOffset: CGVector(dx: left ? 0.15 : 0.85, dy: 0.72))
+            a.press(forDuration: 0.05, thenDragTo: b)
+        }
+        func expectTitle(_ days: Int, _ message: String) {
+            let found = app.staticTexts[title(days)].waitForExistence(timeout: 3)
+            XCTAssertTrue(found, "\(message); title is \(app.navigationBars.firstMatch.identifier)")
+        }
+        // A finger-speed swipe that starts on a record.
+        let row = app.buttons["day-entry"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        let start = row.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5))
+        start.press(forDuration: 0.02, thenDragTo: row.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)),
+                    withVelocity: .slow, thenHoldForDuration: 0)
+        expectTitle(1, "swipe on a record did not go to the next day")
+        XCTAssertFalse(app.buttons["key-✓"].exists, "the swipe opened the record instead")
+        XCTAssertTrue(app.staticTexts["這天沒有紀錄"].waitForExistence(timeout: 3))
+        swipe(left: false)
+        expectTitle(0, "swipe right did not go back")
+        XCTAssertTrue(app.buttons["day-entry"].firstMatch.waitForExistence(timeout: 3), "today's record missing")
+        swipe(left: false)
+        expectTitle(-1, "swipe right did not go to the previous day")
+        snapshot("d-previous-day")
+
+        // A plain tap still opens the record.
+        swipe(left: true)
+        expectTitle(0, "swipe left did not come back to today")
+        app.buttons["day-entry"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["key-✓"].waitForExistence(timeout: 5), "tap did not open the record")
+    }
+
+    func testCashCheckIn() {
+        addExpense(["1", "2", "0"])
+        app.buttons["帳戶"].firstMatch.tap()
+        app.staticTexts["錢包"].firstMatch.tap()
+        let button = app.buttons["金額相符，對帳打卡"]
+        XCTAssertTrue(button.waitForExistence(timeout: 5), "no check-in on the cash account")
+        button.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH '上次對帳'")).firstMatch
+            .waitForExistence(timeout: 3), "last check-in not shown")
+        XCTAssertTrue(app.descendants(matching: .any)["check-in"].firstMatch.exists, "check-in not among the records")
+        snapshot("k1-account")
+
+        // Also right from the account list.
+        app.navigationBars.buttons.firstMatch.tap()
+        let listButton = app.buttons["今天已對帳 錢包"]
+        XCTAssertTrue(listButton.waitForExistence(timeout: 5), "no check-in button on the account row")
+        listButton.tap()
+        XCTAssertFalse(app.buttons["金額相符，對帳打卡"].exists, "the check-in button opened the account")
+        snapshot("k0-list")
+
+        // On the calendar: today's records start with the check-in.
+        app.buttons["明細"].firstMatch.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["day-check-in"].firstMatch.waitForExistence(timeout: 5),
+                      "check-in not shown for the day")
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "day-check-in").count, 2,
+                       "both check-ins should show for the day")
+        snapshot("k2-calendar")
+    }
+
     func testLongPressDeletesRecord() {
         addExpense(["1", "2", "0"])
         app.buttons["明細"].firstMatch.tap()

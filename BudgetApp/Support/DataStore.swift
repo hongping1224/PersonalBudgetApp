@@ -4,7 +4,7 @@ import SwiftData
 @MainActor
 enum DataStore {
     static let schema = Schema([Account.self, EntryCategory.self, Budget.self, BudgetAdjustment.self, Entry.self,
-                                BudgetRule.self])
+                                BudgetRule.self, BalanceCheck.self])
 
     /// Shared by the app and the Siri / Shortcuts intents, which run in the same process.
     static let container: ModelContainer = {

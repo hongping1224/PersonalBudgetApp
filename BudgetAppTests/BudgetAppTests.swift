@@ -405,6 +405,30 @@ final class BudgetAppTests: XCTestCase {
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<EntryCategory>()), Seed.expenseCategories.count + Seed.incomeCategories.count)
     }
 
+    func testBalanceCheckIn() throws {
+        let wallet = Account(name: "錢包", type: .cash, initialBalance: 1000)
+        let card = Account(name: "卡", type: .creditCard)
+        [wallet, card].forEach(context.insert)
+        context.insert(Entry(kind: .expense, amount: 120, date: date(2026, 11, 8), account: wallet))
+        // Recorded later but dated after the check: not part of the checked balance.
+        context.insert(Entry(kind: .expense, amount: 50, date: date(2026, 11, 10), account: wallet))
+        try context.save()
+        XCTAssertTrue(wallet.canCheckBalance)
+        XCTAssertFalse(card.canCheckBalance)
+
+        let check = BalanceCheck(account: wallet, date: date(2026, 11, 9))
+        context.insert(check)
+        XCTAssertEqual(check.balance, 880)
+        XCTAssertEqual(wallet.balance, 830, "a check-in isn't a record and doesn't change the balance")
+
+        let data = try BackupFile.encoder.encode(try BackupFile(context: context))
+        try BackupFile.decoder.decode(BackupFile.self, from: data).restore(into: context)
+        let restored = try context.fetch(FetchDescriptor<BalanceCheck>())
+        XCTAssertEqual(restored.count, 1)
+        XCTAssertEqual(restored.first?.balance, 880)
+        XCTAssertEqual(restored.first?.accountID, wallet.id)
+    }
+
     func testAccountGroups() throws {
         let salary = Account(name: "薪資", type: .bank, initialBalance: 1000, sortOrder: 0)
         let wallet = Account(name: "另一間", type: .bank, initialBalance: 50, sortOrder: 1)

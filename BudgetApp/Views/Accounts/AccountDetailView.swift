@@ -18,6 +18,8 @@ enum AccountHistory {
 
 struct AccountDetailView: View {
     let account: Account
+    @Environment(\.modelContext) private var context
+    @Query private var checks: [BalanceCheck]
     @State private var editingAccount = false
     @State private var editingEntry: Entry?
     @State private var from: Date
@@ -25,6 +27,8 @@ struct AccountDetailView: View {
 
     init(account: Account) {
         self.account = account
+        let id = account.id
+        _checks = Query(filter: #Predicate<BalanceCheck> { $0.accountID == id }, sort: \BalanceCheck.date, order: .reverse)
         _from = State(initialValue: AccountHistory.start(months: AccountHistory.months))
         _to = State(initialValue: Calendar.current.startOfDay(for: .now))
     }
@@ -42,6 +46,48 @@ struct AccountDetailView: View {
         }
     }
 
+    private enum Row {
+        case entry(Entry)
+        case check(BalanceCheck)
+        var id: UUID { switch self { case .entry(let e): e.id; case .check(let c): c.id } }
+        var date: Date { switch self { case .entry(let e): e.date; case .check(let c): c.date } }
+    }
+
+    /// A month's records with the check-ins made in it, newest first.
+    private func rows(for group: (month: Date, entries: [Entry])) -> [Row] {
+        let cal = Calendar.current
+        let inMonth = checks.filter { cal.isDate($0.date, equalTo: group.month, toGranularity: .month) }
+        return (group.entries.map(Row.entry) + inMonth.map(Row.check)).sorted { $0.date > $1.date }
+    }
+
+    /// 對帳打卡: tap when the cash counted matches the recorded balance.
+    private var checkInRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                context.insert(BalanceCheck(account: account))
+                try? context.save()
+            } label: {
+                Label("金額相符，對帳打卡", systemImage: "checkmark.seal.fill")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(BalanceCheck.color)
+            Group {
+                if let last = checks.first {
+                    Text("上次對帳 \(last.date.formatted(.dateTime.month(.defaultDigits).day().hour().minute()))，餘額 \(Money.string(last.balance, currency: account.currency))")
+                } else {
+                    Text("點錢包裡的錢和這裡的餘額一樣時，打一次卡。之後回頭核對只需要看到上次打卡的日期。")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
+    }
+
     private var hasOlder: Bool {
         let start = Calendar.current.startOfDay(for: from)
         return allEntries.contains { $0.date < start }
@@ -56,6 +102,9 @@ struct AccountDetailView: View {
                     Text(Money.string(account.balance, currency: account.currency))
                         .font(.title3.weight(.semibold).monospacedDigit())
                         .foregroundStyle(account.balance >= 0 ? Color.income : Color.expense)
+                }
+                if account.canCheckBalance {
+                    checkInRow
                 }
                 if account.type == .creditCard {
                     if let limit = account.creditLimit {
@@ -90,9 +139,21 @@ struct AccountDetailView: View {
             }
             ForEach(groupedEntries, id: \.month) { group in
                 Section(group.month.monthTitle) {
-                    ForEach(group.entries) { entry in
-                        Button { editingEntry = entry } label: { EntryRow(entry: entry, showDate: true) }
-                            .tint(.primary)
+                    // Check-ins sit among the records at their time, so it's clear where checking back can stop.
+                    ForEach(rows(for: group), id: \.id) { row in
+                        switch row {
+                        case .entry(let entry):
+                            Button { editingEntry = entry } label: { EntryRow(entry: entry, showDate: true) }
+                                .tint(.primary)
+                        case .check(let check):
+                            CheckInRow(check: check, currency: account.currency)
+                                .swipeActions {
+                                    Button(role: .destructive) {
+                                        context.delete(check)
+                                        try? context.save()
+                                    } label: { Label("刪除", systemImage: "trash") }
+                                }
+                        }
                     }
                 }
             }
@@ -270,5 +331,29 @@ struct AccountEditor: View {
         try? context.save()
         StatementReminder.reschedule(context: context)
         dismiss()
+    }
+}
+
+/// A check-in among an account's records.
+struct CheckInRow: View {
+    let check: BalanceCheck
+    let currency: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            SymbolBadge(symbol: "checkmark.seal.fill", color: BalanceCheck.color)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("對帳打卡")
+                Text(check.date.formatted(.dateTime.month().day().weekday(.abbreviated).hour().minute()))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(Money.string(check.balance, currency: currency))
+                .font(.body.weight(.semibold)).monospacedDigit()
+                .foregroundStyle(BalanceCheck.color)
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("check-in")
     }
 }
