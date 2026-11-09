@@ -10,6 +10,8 @@ struct AccountsView: View {
     @State private var hideAmounts = false
     @State private var expanded: Set<AccountType> = Set(AccountType.allCases)
     @AppStorage("netWorthCollapsed") private var netWorthCollapsed = false
+    /// Collapsed account groups, one "type|name" per line.
+    @AppStorage("collapsedAccountGroups") private var collapsedGroups = ""
 
     var body: some View {
         NavigationStack {
@@ -71,9 +73,22 @@ struct AccountsView: View {
                     let group = active.filter { $0.type == type }
                     if !group.isEmpty {
                         Section(isExpanded: binding(for: type)) {
-                            ForEach(group) { account in
-                                NavigationLink { AccountDetailView(account: account) } label: {
-                                    AccountRow(account: account, balance: balances[account.id] ?? 0, masked: hideAmounts)
+                            ForEach(AccountListItem.items(for: group)) { item in
+                                switch item {
+                                case .single(let account):
+                                    NavigationLink { AccountDetailView(account: account) } label: {
+                                        AccountRow(account: account, balance: balances[account.id] ?? 0, masked: hideAmounts)
+                                    }
+                                case .group(let name, let members):
+                                    groupRow(name, members: members, type: type)
+                                    if !isCollapsed(name, type: type) {
+                                        ForEach(members) { account in
+                                            NavigationLink { AccountDetailView(account: account) } label: {
+                                                AccountRow(account: account, balance: balances[account.id] ?? 0, masked: hideAmounts)
+                                                    .padding(.leading, 12)
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         } header: {
@@ -123,6 +138,44 @@ struct AccountsView: View {
     }
 
     private func mask(_ s: String) -> String { hideAmounts ? "＊＊＊＊" : s }
+
+    /// Group header with its total; tap to fold its accounts away.
+    private func groupRow(_ name: String, members: [Account], type: AccountType) -> some View {
+        let total = AccountListItem.total(of: members)
+        let collapsed = isCollapsed(name, type: type)
+        return Button { toggleCollapsed(name, type: type) } label: {
+            HStack(spacing: 12) {
+                SymbolBadge(symbol: "folder", color: Color(hex: "#5C6F82"), size: 40)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name).font(.body.weight(.semibold))
+                    Text("\(members.count) 個帳戶").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(mask(Money.string(total.amount, currency: total.currency)))
+                    .font(.body.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(total.amount >= 0 ? Color.income : Color.expense)
+                Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("group-\(name)")
+    }
+
+    private func collapseKey(_ name: String, type: AccountType) -> String { "\(type.rawValue)|\(name)" }
+
+    private func isCollapsed(_ name: String, type: AccountType) -> Bool {
+        collapsedGroups.split(separator: "\n").contains(Substring(collapseKey(name, type: type)))
+    }
+
+    private func toggleCollapsed(_ name: String, type: AccountType) {
+        let key = collapseKey(name, type: type)
+        var keys = collapsedGroups.split(separator: "\n").map(String.init)
+        if let index = keys.firstIndex(of: key) { keys.remove(at: index) } else { keys.append(key) }
+        collapsedGroups = keys.joined(separator: "\n")
+    }
 
     private func binding(for type: AccountType) -> Binding<Bool> {
         Binding(get: { expanded.contains(type) },

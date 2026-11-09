@@ -405,6 +405,38 @@ final class BudgetAppTests: XCTestCase {
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<EntryCategory>()), Seed.expenseCategories.count + Seed.incomeCategories.count)
     }
 
+    func testAccountGroups() throws {
+        let salary = Account(name: "薪資", type: .bank, initialBalance: 1000, sortOrder: 0)
+        let wallet = Account(name: "另一間", type: .bank, initialBalance: 50, sortOrder: 1)
+        let travel = Account(name: "旅遊", type: .bank, initialBalance: 2000, sortOrder: 2)
+        salary.groupName = "甲銀行"
+        travel.groupName = "甲銀行"
+        [salary, wallet, travel].forEach(context.insert)
+
+        let items = AccountListItem.items(for: [salary, wallet, travel])
+        XCTAssertEqual(items.map(\.id), ["group-甲銀行", wallet.id.uuidString])
+        guard case .group(_, let members) = items[0] else { return XCTFail("not a group") }
+        XCTAssertEqual(members.map(\.name), ["薪資", "旅遊"])
+        XCTAssertEqual(salary.fullName, "甲銀行・薪資")
+        XCTAssertEqual(wallet.fullName, "另一間")
+
+        // Same currency: totals in it. Mixed: in TWD at the saved rate.
+        XCTAssertEqual(AccountListItem.total(of: members).amount, 3000)
+        XCTAssertEqual(AccountListItem.total(of: members).currency, "TWD")
+        let yen = Account(name: "日圓", type: .bank, initialBalance: 1000)
+        yen.currency = "JPY"
+        Currency.setRate(0.2, for: "JPY")
+        XCTAssertEqual(AccountListItem.total(of: [yen]).amount, 1000)
+        XCTAssertEqual(AccountListItem.total(of: [yen]).currency, "JPY")
+        XCTAssertEqual(AccountListItem.total(of: [salary, yen]).amount, 1200, accuracy: 0.001)
+        XCTAssertEqual(AccountListItem.total(of: [salary, yen]).currency, "TWD")
+
+        // Survives a backup round trip.
+        let data = try BackupFile.encoder.encode(try BackupFile(context: context))
+        try BackupFile.decoder.decode(BackupFile.self, from: data).restore(into: context)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Account>()).first { $0.name == "旅遊" }?.groupName, "甲銀行")
+    }
+
     func testMultiCurrency() throws {
         Seed.insertDefaultsIfNeeded(context)
         let food = try XCTUnwrap(try context.fetch(FetchDescriptor<EntryCategory>()).first { $0.name == "食物" })

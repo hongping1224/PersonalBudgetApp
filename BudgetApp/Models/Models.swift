@@ -60,6 +60,8 @@ final class Account {
     var statementDay: Int?
     /// Currency the balance and its entries are kept in.
     var currency: String = "TWD"
+    /// Bank or other group this account is listed under with a total; empty = on its own.
+    var groupName: String = ""
     var isArchived: Bool = false
     var sortOrder: Int = 0
     var createdAt: Date = Date()
@@ -100,8 +102,42 @@ final class Account {
 
     var entryCount: Int { (entries?.count ?? 0) + (incomingTransfers?.count ?? 0) }
 
+    /// Name with its group, for lists where accounts from different groups mix.
+    var fullName: String { groupName.isEmpty ? name : "\(groupName)・\(name)" }
+
     /// Balance in TWD at today's rate, for net worth.
     var baseBalance: Double { balance * Currency.rate(currency) }
+}
+
+/// A row in the 帳戶 list: an account on its own, or a group of them with a total.
+enum AccountListItem: Identifiable {
+    case single(Account)
+    case group(name: String, accounts: [Account])
+
+    var id: String {
+        switch self {
+        case .single(let account): account.id.uuidString
+        case .group(let name, _): "group-" + name
+        }
+    }
+
+    /// Accounts in list order; a group sits where its first account is.
+    static func items(for accounts: [Account]) -> [AccountListItem] {
+        var seen = Set<String>()
+        return accounts.compactMap { account in
+            if account.groupName.isEmpty { return .single(account) }
+            guard seen.insert(account.groupName).inserted else { return nil }
+            return .group(name: account.groupName, accounts: accounts.filter { $0.groupName == account.groupName })
+        }
+    }
+
+    /// A group's total: in its currency when all its accounts share one, otherwise in TWD.
+    static func total(of accounts: [Account]) -> (amount: Double, currency: String) {
+        if let currency = accounts.first?.currency, accounts.allSatisfy({ $0.currency == currency }) {
+            return (accounts.reduce(0) { $0 + $1.balance }, currency)
+        }
+        return (accounts.reduce(0) { $0 + $1.baseBalance }, Currency.base)
+    }
 }
 
 @Model

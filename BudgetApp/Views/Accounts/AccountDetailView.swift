@@ -127,6 +127,7 @@ struct AccountEditor: View {
     @State private var name = ""
     @State private var type: AccountType = .bank
     @State private var currency = Currency.base
+    @State private var groupName = ""
     @State private var balanceText = ""
     @State private var limitText = ""
     @State private var hasDueDay = false
@@ -152,6 +153,28 @@ struct AccountEditor: View {
                     if (account?.entryCount ?? 0) > 0 {
                         Text("已有紀錄的帳戶不能改幣別。")
                     }
+                }
+                Section {
+                    TextField("例如 銀行名稱（可不填）", text: $groupName)
+                        .accessibilityLabel("銀行或群組")
+                    let others = existingGroups
+                    if !others.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack {
+                                ForEach(others, id: \.self) { group in
+                                    Button(group) { groupName = group }
+                                        .font(.subheadline)
+                                        .padding(.horizontal, 12).padding(.vertical, 6)
+                                        .background(Color.themeFill, in: Capsule())
+                                        .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("銀行或群組")
+                } footer: {
+                    Text("同類型帳戶填一樣的名字，會排在一起並顯示合計。同一個銀行帳戶裡分開管理的錢，也可以各建一個帳戶放進同一組。")
                 }
                 Section {
                     TextField("0", text: $balanceText).keyboardType(.numbersAndPunctuation)
@@ -205,9 +228,16 @@ struct AccountEditor: View {
         }
     }
 
+    /// Group names already used, to pick from.
+    private var existingGroups: [String] {
+        let trimmed = groupName.trimmingCharacters(in: .whitespaces)
+        return Array(Set(allAccounts.map(\.groupName))).filter { !$0.isEmpty && $0 != trimmed }.sorted()
+    }
+
     private func load() {
         guard let account else { return }
         name = account.name
+        groupName = account.groupName
         type = account.type
         currency = account.currency
         balanceText = Money.plain(account.balance)
@@ -227,6 +257,7 @@ struct AccountEditor: View {
             return a
         }()
         target.name = name.trimmingCharacters(in: .whitespaces)
+        target.groupName = groupName.trimmingCharacters(in: .whitespaces)
         target.type = type
         if target.entryCount == 0 { target.currency = currency }
         if let wanted = Double(balanceText.replacingOccurrences(of: ",", with: "")) {

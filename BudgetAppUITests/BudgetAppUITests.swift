@@ -401,6 +401,100 @@ final class BudgetAppUITests: XCTestCase {
         app.navigationBars.buttons.firstMatch.tap()
     }
 
+    func testCalendarSlidesBetweenMonths() {
+        app.buttons["明細"].firstMatch.tap()
+        let cal = Calendar.current
+        // The title is the selected day; it moves a month with each swipe, keeping the day number.
+        func title(_ offset: Int) -> String {
+            let today = cal.startOfDay(for: .now)
+            let first = cal.date(from: cal.dateComponents([.year, .month], from: today))!
+            let month = cal.date(byAdding: .month, value: offset, to: first)!
+            let length = cal.range(of: .day, in: .month, for: month)!.count
+            let d = cal.date(byAdding: .day, value: min(cal.component(.day, from: today), length) - 1, to: month)!
+            return String(format: "%04d/%02d/%02d", cal.component(.year, from: d), cal.component(.month, from: d),
+                          cal.component(.day, from: d))
+        }
+        // Swipe across the middle of the calendar (neighbouring months' cards sit off screen).
+        func swipe(left: Bool) {
+            let a = app.coordinate(withNormalizedOffset: CGVector(dx: left ? 0.85 : 0.15, dy: 0.32))
+            let b = app.coordinate(withNormalizedOffset: CGVector(dx: left ? 0.15 : 0.85, dy: 0.32))
+            a.press(forDuration: 0.05, thenDragTo: b)
+        }
+        XCTAssertTrue(app.staticTexts[title(0)].waitForExistence(timeout: 5))
+
+        swipe(left: true)
+        XCTAssertTrue(app.staticTexts[title(1)].waitForExistence(timeout: 3), "swipe left did not go to next month")
+        snapshot("s2-next")
+
+        swipe(left: false)
+        XCTAssertTrue(app.staticTexts[title(0)].waitForExistence(timeout: 3))
+        swipe(left: false)
+        XCTAssertTrue(app.staticTexts[title(-1)].waitForExistence(timeout: 3), "swipe right did not go back")
+
+        // The arrow buttons page too.
+        app.buttons["chevron.right"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts[title(0)].waitForExistence(timeout: 3), "arrow did not page")
+    }
+
+    func testLongPressDeletesRecord() {
+        addExpense(["1", "2", "0"])
+        app.buttons["明細"].firstMatch.tap()
+        let row = app.buttons["day-entry"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.press(forDuration: 1.0)
+        let delete = app.buttons["刪除"].firstMatch
+        XCTAssertTrue(delete.waitForExistence(timeout: 3), "no delete in the long-press menu")
+        snapshot("l1-menu")
+        delete.tap()
+        XCTAssertTrue(app.staticTexts["這天沒有紀錄"].waitForExistence(timeout: 5), "record not deleted")
+    }
+
+    func testAccountGroupTotal() {
+        func addAccount(_ name: String, group: String, balance: String) {
+            app.buttons["新增帳戶"].tap()
+            let field = app.textFields["名稱，例如 我的信用卡"]
+            XCTAssertTrue(field.waitForExistence(timeout: 5))
+            field.tap(); field.typeText(name)
+            let groupField = app.textFields["銀行或群組"]
+            groupField.tap(); groupField.typeText(group)
+            let balanceField = app.textFields["0"]
+            balanceField.tap(); balanceField.typeText(balance)
+            app.buttons["儲存"].firstMatch.tap()
+        }
+        app.buttons["帳戶"].firstMatch.tap()
+        addAccount("薪資", group: "甲銀行", balance: "1000")
+        addAccount("旅遊", group: "甲銀行", balance: "2000")
+
+        let group = app.buttons["group-甲銀行"]
+        XCTAssertTrue(group.waitForExistence(timeout: 5), "group not listed")
+        XCTAssertTrue(app.staticTexts["$3,000"].exists, "group total missing")
+        app.swipeUp() // The list loads rows as they come on screen.
+        XCTAssertTrue(app.staticTexts["旅遊"].waitForExistence(timeout: 5), "account not under its group")
+        snapshot("g1-group")
+
+        // Folding hides its accounts and keeps the total.
+        group.tap()
+        XCTAssertTrue(app.staticTexts["旅遊"].waitForNonExistence(timeout: 5), "still expanded")
+        XCTAssertTrue(app.staticTexts["$3,000"].exists)
+        group.tap()
+        XCTAssertTrue(app.staticTexts["旅遊"].waitForExistence(timeout: 5), "did not expand")
+
+        // A transfer between long account names keeps its tag on one line.
+        addAccount("信用卡繳款專用", group: "很長的銀行名稱", balance: "500")
+        app.buttons["記一筆"].firstMatch.tap()
+        app.buttons["轉帳"].firstMatch.tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH '從'")).firstMatch.tap()
+        app.buttons["很長的銀行名稱・信用卡繳款專用"].firstMatch.tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH '到'")).firstMatch.tap()
+        app.buttons["甲銀行・旅遊"].firstMatch.tap()
+        press("1", "0", "✓")
+        app.buttons["明細"].firstMatch.tap()
+        let tag = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '→'")).firstMatch
+        XCTAssertTrue(tag.waitForExistence(timeout: 5))
+        XCTAssertLessThan(tag.frame.height, 22, "transfer tag wraps onto two lines")
+        snapshot("g2-transfer-tag")
+    }
+
     func testDailyBudgetOption() {
         app.buttons["預算"].firstMatch.tap()
         addBudget("Dinner", amount: "1250")

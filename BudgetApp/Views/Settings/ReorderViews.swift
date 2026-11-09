@@ -36,7 +36,7 @@ struct AccountOrderView: View {
                 if !group.isEmpty {
                     Section(type.title) {
                         ForEach(group) { a in
-                            Label(a.name, systemImage: a.type.symbol)
+                            Label(a.fullName, systemImage: a.type.symbol)
                         }
                         .onMove { from, to in move(in: group, from: from, to: to) }
                     }

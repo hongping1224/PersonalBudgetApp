@@ -10,6 +10,7 @@ struct BackupFile: Codable {
         var creditLimit: Double?, paymentDueDay: Int?, isArchived: Bool, sortOrder: Int
         var statementDay: Int?
         var currency: String?
+        var groupName: String?
     }
     struct CategoryDTO: Codable {
         var id: UUID, name: String, symbol: String, colorHex: String, kind: String
@@ -55,7 +56,8 @@ struct BackupFile: Codable {
             AccountDTO(id: $0.id, name: $0.name, type: $0.typeRaw, initialBalance: $0.initialBalance,
                        creditLimit: $0.creditLimit, paymentDueDay: $0.paymentDueDay,
                        isArchived: $0.isArchived, sortOrder: $0.sortOrder, statementDay: $0.statementDay,
-                       currency: $0.currency == Currency.base ? nil : $0.currency)
+                       currency: $0.currency == Currency.base ? nil : $0.currency,
+                       groupName: $0.groupName.isEmpty ? nil : $0.groupName)
         }
         categories = try context.fetch(FetchDescriptor<EntryCategory>()).map {
             CategoryDTO(id: $0.id, name: $0.name, symbol: $0.symbol, colorHex: $0.colorHex,
@@ -128,6 +130,7 @@ struct BackupFile: Codable {
             m.paymentDueDay = a.paymentDueDay
             m.statementDay = a.statementDay
             m.currency = a.currency ?? Currency.base
+            m.groupName = a.groupName ?? ""
             m.isArchived = a.isArchived
             context.insert(m)
             accountMap[a.id] = m

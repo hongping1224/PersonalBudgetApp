@@ -230,7 +230,7 @@ struct EntryEditor: View {
             if !group.isEmpty {
                 Section(type.title) {
                     ForEach(group) { a in
-                        Button { select(a) } label: { Label(a.name, systemImage: a.type.symbol) }
+                        Button { select(a) } label: { Label(a.fullName, systemImage: a.type.symbol) }
                     }
                 }
             }
@@ -247,7 +247,7 @@ struct EntryEditor: View {
                 if !group.isEmpty {
                     DropItem.header(type.title)
                     ForEach(group) { a in
-                        DropItem.row(a.name, symbol: a.type.symbol, selected: a.id == account?.id) {
+                        DropItem.row(a.fullName, symbol: a.type.symbol, selected: a.id == account?.id) {
                             account = a
                             showAccountList = false
                         }
@@ -277,7 +277,7 @@ struct EntryEditor: View {
             HStack {
                 Text(title).foregroundStyle(.secondary)
                 Spacer()
-                Text(selection.wrappedValue?.name ?? "選擇帳戶")
+                Text(selection.wrappedValue?.fullName ?? "選擇帳戶")
                 Image(systemName: "chevron.up.chevron.down").font(.caption)
             }
             .padding()
@@ -320,7 +320,7 @@ struct EntryEditor: View {
             HStack(spacing: 8) {
                 if kind != .transfer {
                     Button { showAccountList = true } label: {
-                        chip(account?.name ?? "帳戶", systemImage: account?.type.symbol ?? "wallet.pass")
+                        chip(account?.fullName ?? "帳戶", systemImage: account?.type.symbol ?? "wallet.pass")
                     }
                     .popover(isPresented: $showAccountList, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
                         accountList

@@ -227,8 +227,12 @@ struct TagCapsule: View {
     var color: Color
 
     var body: some View {
+        // Always one line: shrink a little, then cut from the middle so both ends stay readable.
         Text(text)
             .font(.caption2.weight(.medium))
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .truncationMode(.middle)
             .foregroundStyle(color)
             .padding(.horizontal, 8)
             .padding(.vertical, 2)

@@ -37,9 +37,9 @@ struct EntryRow: View {
                         TagCapsule(text: budget.name, color: Color(hex: "#E9C98F"))
                     }
                     if entry.kind == .transfer {
-                        TagCapsule(text: "\(entry.account?.name ?? "?") → \(entry.toAccount?.name ?? "?")", color: .teal)
+                        TagCapsule(text: "\(entry.account?.fullName ?? "?") → \(entry.toAccount?.fullName ?? "?")", color: .teal)
                     } else if let account = entry.account {
-                        TagCapsule(text: account.name, color: .teal)
+                        TagCapsule(text: account.fullName, color: .teal)
                     }
                 }
             }
