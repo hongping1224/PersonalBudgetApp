@@ -208,6 +208,7 @@ struct RootView: View {
                 openStatement(URL(fileURLWithPath: path))
             }
             WidgetSync.publish(context)
+            BalanceCheck.pruneToLatest(in: context)
             StatementReminder.reschedule(context: context)
         }
         .onChange(of: scenePhase) { _, phase in

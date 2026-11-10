@@ -64,8 +64,7 @@ struct AccountDetailView: View {
     private var checkInRow: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
-                context.insert(BalanceCheck(account: account))
-                try? context.save()
+                BalanceCheck.record(account, in: context)
             } label: {
                 Label("金額相符，對帳打卡", systemImage: "checkmark.seal.fill")
                     .font(.body.weight(.semibold))

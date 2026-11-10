@@ -503,8 +503,8 @@ final class BudgetAppUITests: XCTestCase {
         app.buttons["明細"].firstMatch.tap()
         XCTAssertTrue(app.descendants(matching: .any)["day-check-in"].firstMatch.waitForExistence(timeout: 5),
                       "check-in not shown for the day")
-        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "day-check-in").count, 2,
-                       "both check-ins should show for the day")
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "day-check-in").count, 1,
+                       "only the latest check-in is kept")
         snapshot("k2-calendar")
     }
 

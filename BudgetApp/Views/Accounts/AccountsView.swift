@@ -147,8 +147,7 @@ struct AccountsView: View {
     private func checkIn(_ account: Account) -> (() -> Void)? {
         guard account.canCheckBalance else { return nil }
         return {
-            context.insert(BalanceCheck(account: account))
-            try? context.save()
+            BalanceCheck.record(account, in: context)
         }
     }
 

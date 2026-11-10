@@ -187,8 +187,7 @@ struct StatementImportView: View {
                 Button {
                     let end = Calendar.current.date(byAdding: .day, value: 1,
                                                     to: Calendar.current.startOfDay(for: statement.closingDate ?? .now))!
-                    context.insert(BalanceCheck(account: account, date: end.addingTimeInterval(-1)))
-                    try? context.save()
+                    BalanceCheck.record(account, date: end.addingTimeInterval(-1), in: context)
                     checkedIn = true
                 } label: {
                     Label(checkedIn ? "已打卡" : "對帳打卡", systemImage: "checkmark.seal.fill")

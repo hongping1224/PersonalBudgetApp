@@ -430,6 +430,27 @@ final class BudgetAppTests: XCTestCase {
         XCTAssertEqual(restored.first?.accountID, wallet.id)
     }
 
+    func testOnlyLatestCheckInKept() throws {
+        let wallet = Account(name: "錢包", type: .cash, initialBalance: 1000)
+        let other = Account(name: "零錢", type: .cash)
+        [wallet, other].forEach(context.insert)
+        BalanceCheck.record(other, date: date(2026, 11, 1), in: context)
+        BalanceCheck.record(wallet, date: date(2026, 11, 5), in: context)
+        BalanceCheck.record(wallet, date: date(2026, 11, 9), in: context)
+        XCTAssertNil(BalanceCheck.record(wallet, date: date(2026, 11, 7), in: context), "older than the latest")
+        var checks = try context.fetch(FetchDescriptor<BalanceCheck>())
+        XCTAssertEqual(checks.filter { $0.accountID == wallet.id }.map(\.date), [date(2026, 11, 9)])
+        XCTAssertEqual(checks.count, 2, "other accounts keep theirs")
+
+        // Several from before: keep each account's latest.
+        context.insert(BalanceCheck(accountID: wallet.id, date: date(2026, 10, 1), balance: 0))
+        context.insert(BalanceCheck(accountID: wallet.id, date: date(2026, 11, 20), balance: 0))
+        BalanceCheck.pruneToLatest(in: context)
+        checks = try context.fetch(FetchDescriptor<BalanceCheck>())
+        XCTAssertEqual(checks.filter { $0.accountID == wallet.id }.map(\.date), [date(2026, 11, 20)])
+        XCTAssertEqual(checks.count, 2)
+    }
+
     func testAccountGroups() throws {
         let salary = Account(name: "薪資", type: .bank, initialBalance: 1000, sortOrder: 0)
         let wallet = Account(name: "另一間", type: .bank, initialBalance: 50, sortOrder: 1)

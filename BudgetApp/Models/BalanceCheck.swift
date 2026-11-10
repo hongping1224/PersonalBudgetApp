@@ -24,6 +24,32 @@ final class BalanceCheck {
         self.balance = balance
     }
 
+    /// Checks in `account` at `date`, keeping only its latest check-in: an older one is replaced,
+    /// and a check-in dated before the latest one is ignored.
+    @discardableResult
+    static func record(_ account: Account, date: Date = .now, in context: ModelContext) -> BalanceCheck? {
+        let id = account.id
+        let existing = (try? context.fetch(FetchDescriptor<BalanceCheck>(predicate: #Predicate { $0.accountID == id }))) ?? []
+        if let latest = existing.map(\.date).max(), latest > date { return nil }
+        existing.forEach(context.delete)
+        let check = BalanceCheck(account: account, date: date)
+        context.insert(check)
+        try? context.save()
+        return check
+    }
+
+    /// Drops all but each account's latest check-in (from before only the latest was kept).
+    static func pruneToLatest(in context: ModelContext) {
+        let all = (try? context.fetch(FetchDescriptor<BalanceCheck>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []
+        var seen = Set<UUID>()
+        var changed = false
+        for check in all where !seen.insert(check.accountID).inserted {
+            context.delete(check)
+            changed = true
+        }
+        if changed { try? context.save() }
+    }
+
     /// Color for check-ins on the calendar and in lists.
     static let color = Color(hex: "#E8A33D")
 }
