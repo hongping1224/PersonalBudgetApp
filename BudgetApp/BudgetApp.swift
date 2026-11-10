@@ -32,6 +32,8 @@ final class AppRouter {
     var copyCarrier = false
     /// Credit card whose statement to show (from the closing-day notification).
     var statementAccountID: UUID?
+    /// Bank PDF bill shared into the app, to reconcile.
+    var sharedStatement: SharedStatement?
     /// Day selected on the home calendar; new entries default to it.
     var preferredDate: Date?
 
@@ -171,6 +173,10 @@ struct RootView: View {
         }
         // Widget buttons open budgetapp://add?kind=…&category=….
         .onOpenURL { url in
+            if url.isFileURL {
+                openStatement(url)
+                return
+            }
             if url == Carrier.link {
                 // Over any open sheet the popup would sit underneath, so close those first.
                 router.showAddEntry = false
@@ -194,7 +200,13 @@ struct RootView: View {
                 }
             }
         }
+        .background {
+            Color.clear.sheet(item: $router.sharedStatement) { StatementImportView(data: $0.data) }
+        }
         .onAppear {
+            if let path = UserDefaults.standard.string(forKey: "uitestStatementPath") {
+                openStatement(URL(fileURLWithPath: path))
+            }
             WidgetSync.publish(context)
             StatementReminder.reschedule(context: context)
         }
@@ -218,5 +230,17 @@ struct RootView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: router.showCarrier)
+    }
+
+    /// A PDF shared from Mail or Files: read it, drop iOS's Inbox copy, and open the reconcile sheet.
+    private func openStatement(_ url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url) else { return }
+        if url.path.contains("/Documents/Inbox/") { try? FileManager.default.removeItem(at: url) }
+        router.showAddEntry = false
+        router.showBudgetTransfer = false
+        router.statementAccountID = nil
+        router.sharedStatement = SharedStatement(data: data)
     }
 }

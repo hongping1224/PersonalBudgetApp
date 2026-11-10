@@ -29,6 +29,22 @@ extension Account {
         return entry.statementOffset == 0 ? base : statementInterval(offset: entry.statementOffset, from: base, calendar: calendar)
     }
 
+    /// Bills `entry` in `interval` by changing how many bills it's moved later (its date stays).
+    /// Returns false when that would need moving it earlier than its own date's bill.
+    @discardableResult
+    func move(_ entry: Entry, toBill interval: DateInterval, calendar: Calendar = .current) -> Bool {
+        let original = entry.statementOffset
+        for _ in 0..<24 {
+            guard let billed = billedStatement(for: entry, calendar: calendar) else { break }
+            if billed == interval { return true }
+            if billed.start < interval.start { entry.statementOffset += 1 }
+            else if entry.statementOffset > 0 { entry.statementOffset -= 1 }
+            else { break }
+        }
+        entry.statementOffset = original
+        return false
+    }
+
     /// Charges and refunds billed in this statement, including ones moved here from earlier ones.
     func statementEntries(in interval: DateInterval) -> [Entry] {
         (entries ?? []).filter { e in

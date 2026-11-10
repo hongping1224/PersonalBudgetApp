@@ -1,4 +1,5 @@
 import XCTest
+import PDFKit
 
 /// Walks through the main flows and attaches a screenshot of each screen.
 final class BudgetAppUITests: XCTestCase {
@@ -713,5 +714,56 @@ final class BudgetAppUITests: XCTestCase {
 
         app.buttons["統計"].firstMatch.tap()
         snapshot("7-stats")
+    }
+
+    /// A password-protected bill PDF shared into the app (as from Mail): pick the account,
+    /// unlock it, see what's missing and add it.
+    func testReconcileSharedStatementPDF() throws {
+        let lines = [
+            "帳單結帳日 115/11/08",
+            "+本期新增款項 750",
+            "1151004 1151008 連支＊範例壽司Taipei 600 TW",
+            "1151012 1151014 範例咖啡A1234 TAINAN 150 TW",
+        ]
+        let pdf = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 595, height: 842)).pdfData { ctx in
+            ctx.beginPage()
+            for (i, line) in lines.enumerated() {
+                (line as NSString).draw(at: CGPoint(x: 20, y: 20 + i * 16),
+                                        withAttributes: [.font: UIFont.systemFont(ofSize: 10)])
+            }
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("statement-uitest.pdf")
+        try? FileManager.default.removeItem(at: url)
+        XCTAssertTrue(PDFDocument(data: pdf)!.write(to: url, withOptions: [.userPasswordOption: "test123",
+                                                                           .ownerPasswordOption: "owner123"]))
+        app.terminate()
+        app.launchArguments += ["-uitestStatementPath", url.path]
+        app.launch()
+
+        let field = app.secureTextFields["pdf-password"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "shared PDF didn't open the reconcile sheet")
+        snapshot("s1-setup")
+        field.tap()
+        field.typeText("wrong")
+        app.buttons["開始對帳"].tap()
+        XCTAssertTrue(app.staticTexts["密碼不對，請再試一次。"].waitForExistence(timeout: 3))
+        field.tap()
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8) + "test123")
+        app.buttons["開始對帳"].tap()
+
+        let status = app.staticTexts["reconcile-status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 5), "no results")
+        XCTAssertEqual(status.label, "有 2 筆對不上")
+        XCTAssertTrue(app.staticTexts["帳單有、App 沒有 (2)"].exists)
+        snapshot("s2-results")
+
+        app.buttons["加到 App"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["category-食物"].waitForExistence(timeout: 5), "editor didn't open on the added record")
+        app.buttons["category-食物"].tap()
+        closeKeyboard()
+        press("✓")
+        XCTAssertTrue(app.staticTexts["已對上 (1)"].waitForExistence(timeout: 5), "added record not matched")
+        XCTAssertEqual(status.label, "有 1 筆對不上")
+        snapshot("s3-added")
     }
 }

@@ -7,6 +7,8 @@ struct StatementView: View {
     @Environment(\.modelContext) private var context
     @State private var interval: DateInterval?
     @State private var editingEntry: Entry?
+    @State private var pickingPDF = false
+    @State private var importing: SharedStatement?
 
     var body: some View {
         ThemedList {
@@ -21,6 +23,18 @@ struct StatementView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { if interval == nil { interval = account.defaultStatement() } }
         .sheet(item: $editingEntry) { EntryEditor(entry: $0) }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { pickingPDF = true } label: { Label("PDF 對帳", systemImage: "doc.text.magnifyingglass") }
+            }
+        }
+        .fileImporter(isPresented: $pickingPDF, allowedContentTypes: [.pdf]) { result in
+            guard let url = try? result.get() else { return }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            if let data = try? Data(contentsOf: url) { importing = SharedStatement(data: data) }
+        }
+        .sheet(item: $importing) { StatementImportView(data: $0.data, preselected: account) }
     }
 
     @ViewBuilder

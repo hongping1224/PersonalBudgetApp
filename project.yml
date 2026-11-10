@@ -30,6 +30,12 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: com.hongping.budgetapp
             CFBundleURLSchemes: [budgetapp]
+        # Lets Mail and Files share PDF bills into the app (帳單對帳).
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: PDF
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [com.adobe.pdf]
     entitlements:
       path: BudgetApp/BudgetApp.entitlements
       properties:

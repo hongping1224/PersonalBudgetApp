@@ -1,4 +1,5 @@
 import XCTest
+import PDFKit
 import SwiftData
 import SwiftUI
 import WidgetKit
@@ -709,5 +710,108 @@ final class BudgetAppTests: XCTestCase {
         XCTAssertEqual(result.value, "/ABC1234")
         Carrier.number = nil
         do { _ = try await GetCarrierIntent().perform(); XCTFail("expected an error") } catch {}
+    }
+
+    // MARK: PDF statement reconcile
+
+    static let sampleStatement = """
+    帳 務 資 訊
+    帳單結帳日 115/11/08
+    上期應繳總額 1,000
+    +本期新增款項 1,451
+    =本期累計應繳金額 1,451
+    消費日 入帳起息日 消費明細(含消費地) 新臺幣金額 外幣折算日 消費地 幣別 外幣金額
+    1151022 1151022 銀行帳戶自動轉帳扣繳信用卡款 -1,000
+    範例卡 (卡號末四碼:0000)
+    1151004 1151008 連支＊範例壽司Taipei 600 TW
+    1151004 1151016 信用卡消費折抵_連支＊範例壽司 -99
+    1151010 1151013 範例百貨（網路TAINAN 150 TW
+    1151012 1151014 範例咖啡A1234 TAINAN 150 TW
+    1151030 1151101 EXAMPLE STORE TOKYO 650 1151031 JP JPY 3,000
+    -------------------------結束-------------------------
+    繳款截止日 115/11/23
+    """
+
+    func testParseStatementText() throws {
+        let s = ParsedStatement.parse(Self.sampleStatement)
+        XCTAssertEqual(s.closingDate, date(2026, 11, 8, 0))
+        XCTAssertEqual(s.newCharges, 1451)
+        XCTAssertEqual(s.amountDue, 1451)
+        XCTAssertEqual(s.items.count, 6)
+        XCTAssertEqual(s.payments.map(\.amount), [-1000])
+        XCTAssertEqual(s.charges.reduce(0) { $0 + $1.amount }, 1451)
+        XCTAssertEqual(s.charges.first?.name, "連支＊範例壽司Taipei")
+        XCTAssertEqual(s.charges.first?.date, date(2026, 10, 4, 0))
+        XCTAssertEqual(s.charges[3].name, "範例咖啡A1234 TAINAN")
+        XCTAssertEqual(s.charges.last?.amount, 650, "TWD amount, not the yen")
+        XCTAssertEqual(ParsedStatement.date(from: "2026/10/04", near: nil), date(2026, 10, 4, 0))
+        XCTAssertEqual(ParsedStatement.date(from: "12/30", near: date(2027, 1, 8)), date(2026, 12, 30, 0))
+    }
+
+    func testReconcileStatement() throws {
+        let card = Account(name: "卡", type: .creditCard)
+        card.statementDay = 8
+        let bank = Account(name: "銀行", type: .bank)
+        [card, bank].forEach(context.insert)
+        for (amount, d) in [(600.0, date(2026, 10, 4)), (150, date(2026, 10, 10)), (150, date(2026, 10, 13)),
+                            (650, date(2026, 10, 30)), (88, date(2026, 11, 7))] {
+            context.insert(Entry(kind: .expense, amount: amount, date: d, account: card))
+        }
+        context.insert(Entry(kind: .transfer, amount: 1000, date: date(2026, 10, 22), account: bank, toAccount: card))
+        try context.save()
+
+        let r = StatementReconciliation(statement: ParsedStatement.parse(Self.sampleStatement), account: card)
+        XCTAssertEqual(r.matched.count, 5, "four charges and the payment")
+        XCTAssertEqual(r.missing.map(\.amount), [-99], "the discount isn't recorded")
+        XCTAssertEqual(r.extra.map(\.amount), [88], "not posted by the bank yet")
+        XCTAssertEqual(r.appTotal, 1038, "the 10/4 sushi is in the app's previous bill")
+        XCTAssertEqual(r.matched.filter(\.otherBill).map(\.item.amount), [600])
+        XCTAssertFalse(r.allMatch)
+        // Same-priced charges pair with their own days.
+        let coffee = r.matched.first { $0.item.name.hasPrefix("範例咖啡") }
+        XCTAssertEqual(coffee?.entry.date, date(2026, 10, 13))
+
+        let bill = try XCTUnwrap(r.interval)
+        XCTAssertEqual(bill.closingDate, date(2026, 11, 8, 0))
+        // A 出帳日 a day off still picks the bill closing nearest the bank's, not the open one after it.
+        card.statementDay = 7
+        XCTAssertEqual(StatementReconciliation.defaultInterval(for: ParsedStatement.parse(Self.sampleStatement),
+                                                               account: card)?.closingDate, date(2026, 11, 7, 0))
+        card.statementDay = 9
+        XCTAssertEqual(StatementReconciliation.defaultInterval(for: ParsedStatement.parse(Self.sampleStatement),
+                                                               account: card)?.closingDate, date(2026, 11, 9, 0))
+        card.statementDay = 8
+        XCTAssertTrue(card.move(r.extra[0], toBill: card.statementInterval(offset: 1, from: bill)!))
+        XCTAssertFalse(card.move(r.extra[0], toBill: card.statementInterval(offset: -1, from: bill)!),
+                       "can't bill before its own date")
+        XCTAssertEqual(r.extra[0].statementOffset, 1)
+        let discount = Entry(kind: .income, amount: 99, date: date(2026, 10, 4), account: card)
+        context.insert(discount)
+        for e in [discount] + r.matched.filter(\.otherBill).map(\.entry) { card.move(e, toBill: bill) }
+        try context.save()
+        let after = StatementReconciliation(statement: ParsedStatement.parse(Self.sampleStatement), account: card)
+        XCTAssertTrue(after.allMatch)
+        XCTAssertTrue(after.matched.allSatisfy { !$0.otherBill })
+        XCTAssertEqual(after.appTotal, 1451)
+    }
+
+    func testReadPasswordPDF() throws {
+        let text = Self.sampleStatement.components(separatedBy: "\n")
+        let pdf = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 595, height: 842)).pdfData { ctx in
+            ctx.beginPage()
+            for (i, line) in text.enumerated() {
+                (line as NSString).draw(at: CGPoint(x: 20, y: 20 + i * 16),
+                                        withAttributes: [.font: UIFont.systemFont(ofSize: 10)])
+            }
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("locked.pdf")
+        XCTAssertTrue(PDFDocument(data: pdf)!.write(to: url, withOptions: [.userPasswordOption: "test123",
+                                                                           .ownerPasswordOption: "owner123"]))
+        let data = try Data(contentsOf: url)
+        XCTAssertTrue(ParsedStatement.isLocked(data))
+        XCTAssertThrowsError(try ParsedStatement.read(data, password: "nope"))
+        let s = try ParsedStatement.read(data, password: "test123")
+        XCTAssertEqual(s.items.count, 6)
+        XCTAssertEqual(s.newCharges, 1451)
     }
 }

@@ -13,3 +13,4 @@ backups/
 *.store-wal
 *.xcresult
 moze*.json
+build-sim/
