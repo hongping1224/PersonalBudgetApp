@@ -59,6 +59,11 @@ struct ParsedStatement {
     private static let localLine = try! NSRegularExpression(pattern:
         "^\(dateToken)\\s+\(dateToken)\\s+(.+?)\\s+\(amountToken)"
         + "(?:\\s+\\d{4}){0,2}(?:\\s+[A-Z]{2})?(?:\\s+[A-Z]{3})?(?:\\s+[\\d,.]+\\s+\\d{1,2}/\\d{1,2})?$")
+    /// 星展: 消費日 入帳起息日 明細 without the amount. The PDF's text can run several rows together
+    /// on one line and list their amounts on the lines after, in the same order.
+    private static let rowStart = try! NSRegularExpression(pattern:
+        #"(\d{4}/\d{1,2}/\d{1,2})\s+\d{4}/\d{1,2}/\d{1,2}\s+"#)
+    private static let amountOnly = #"^-?[\d,]+(\.\d+)?$"#
 
     static func parse(_ text: String) -> ParsedStatement {
         var result = ParsedStatement()
@@ -82,23 +87,66 @@ struct ParsedStatement {
            let token = lines.first(where: { $0.range(of: #"^\d{3}/\d{1,2}/\d{1,2}$"#, options: .regularExpression) != nil }) {
             result.closingDate = date(from: token, near: nil)
         }
+        // 星展: the first date under 帳務明細 is the 結帳日; 新增消費小計 per card; 應繳總金額 on the next line.
+        if result.closingDate == nil, let i = lines.firstIndex(where: { $0.hasPrefix("帳務明細") }), i + 1 < lines.count,
+           let token = firstMatch(#"^\d{4}/\d{1,2}/\d{1,2}"#, in: lines[i + 1]) {
+            result.closingDate = date(from: token, near: nil)
+        }
+        if result.newCharges == nil {
+            let totals = lines.filter { $0.contains("新增消費小計") }.compactMap(trailingAmount)
+            if !totals.isEmpty { result.newCharges = totals.reduce(0, +) }
+        }
+        if result.amountDue == nil, let i = lines.firstIndex(of: "應繳總金額"), i + 1 < lines.count {
+            result.amountDue = trailingAmount(lines[i + 1])
+        }
         // 國泰: 正卡本期消費 (and 附卡本期消費) instead of 本期新增款項.
         if result.newCharges == nil {
             let totals = lines.filter { $0.range(of: #"^(正卡|附卡)?本期消費\s+-?[\d,]+$"#, options: .regularExpression) != nil }
             if !totals.isEmpty { result.newCharges = totals.compactMap(trailingAmount).reduce(0, +) }
         }
 
-        for line in lines {
-            let range = NSRange(line.startIndex..., in: line)
-            guard let m = foreignLine.firstMatch(in: line, range: range) ?? localLine.firstMatch(in: line, range: range),
-                  let dateText = Range(m.range(at: 1), in: line).map({ String(line[$0]) }),
-                  let nameText = Range(m.range(at: 3), in: line).map({ String(line[$0]) }),
-                  let amountText = Range(m.range(at: 4), in: line).map({ String(line[$0]) }),
-                  let date = date(from: dateText, near: result.closingDate),
-                  let amount = number(amountText) else { continue }
-            let name = nameText.trimmingCharacters(in: .whitespaces)
+        /// Rows still waiting for their amount (星展).
+        var pending: [(date: Date, name: String)] = []
+        func add(_ date: Date, _ nameText: String, _ amount: Double) {
+            // 星展 adds the place: 「店名 / TW TAIPEI」.
+            let name = nameText.replacingOccurrences(of: #"\s+/\s+[A-Z]{2}\b.*$"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespaces)
             let isPayment = amount < 0 && (name.contains("繳") || name.contains("付款") || name.contains("還款"))
             result.items.append(Item(date: date, name: name, amount: amount, isPayment: isPayment))
+        }
+        for line in lines {
+            let range = NSRange(line.startIndex..., in: line)
+            let starts = rowStart.matches(in: line, range: range)
+            if starts.count < 2, let m = foreignLine.firstMatch(in: line, range: range) ?? localLine.firstMatch(in: line, range: range),
+               let dateText = Range(m.range(at: 1), in: line).map({ String(line[$0]) }),
+               let nameText = Range(m.range(at: 3), in: line).map({ String(line[$0]) }),
+               let amountText = Range(m.range(at: 4), in: line).map({ String(line[$0]) }),
+               let date = date(from: dateText, near: result.closingDate),
+               let amount = number(amountText) {
+                add(date, nameText, amount)
+                continue
+            }
+            if !pending.isEmpty, line.range(of: amountOnly, options: .regularExpression) != nil, let amount = number(line) {
+                let row = pending.removeFirst()
+                add(row.date, row.name, amount)
+                continue
+            }
+            guard !starts.isEmpty else { pending = []; continue }
+            let ns = line as NSString
+            pending = starts.enumerated().compactMap { i, m in
+                let end = i + 1 < starts.count ? starts[i + 1].range.location : ns.length
+                let nameStart = m.range.location + m.range.length
+                guard let date = date(from: ns.substring(with: m.range(at: 1)), near: result.closingDate) else { return nil }
+                return (date, ns.substring(with: NSRange(location: nameStart, length: end - nameStart)))
+            }
+            // The first row's amount can end the run: 「… 店名 / TW TAINAN 1,500」.
+            if var last = pending.last, let r = last.name.range(of: #"\s+-?[\d,]+(\.\d+)?$"#, options: .regularExpression),
+               let amount = number(last.name[r].trimmingCharacters(in: .whitespaces)) {
+                last.name.removeSubrange(r)
+                pending[pending.count - 1] = last
+                let first = pending.removeFirst()
+                add(first.date, first.name, amount)
+            }
         }
         return result
     }

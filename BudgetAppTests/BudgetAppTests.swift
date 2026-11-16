@@ -807,6 +807,41 @@ final class BudgetAppTests: XCTestCase {
     }
 
     /// 國泰-style: MM/DD dates, card digits and country after the amount, unlabeled 結帳日.
+    func testParseStatementWithRunTogetherRows() throws {
+        // 星展: rows run together on one line, their amounts on the lines after.
+        let text = """
+        帳務明細 ______
+        2026/11/12 2026/11/30 100,000 10,000/100,000 2026/10/13
+        - 2026/11/12 13.99%至2026/11
+        您本期的消費明細如下
+        2026/10/13 2026/10/13 ATM/網路繳款/本行帳戶繳款 -1,000
+        以下為範例卡 正卡（卡號末4碼 0000）新增消費小計 885
+        2026/10/07 2026/10/13 範例餐廳 / TW Taoyuan City 2026/10/07 2026/10/13 範例餐廳 / TW Taoyuan City 2026/10/20 2026/10/23 範例電信 / TW TAIPEI 500
+        -500
+        300
+        - 續下頁-
+        入帳起息日 2026/11/02 2026/11/04 範例水費 / TW TAINAN
+        335
+        CITY
+        2026/11/09 2026/11/10 範例電信 / TW TAIPEI 250
+        2026/11/12 2026/11/12 信用卡年費 3,000
+        2026/11/12 2026/11/12 信用卡年費調整 -3,000
+        應繳總金額
+        885
+        最低應繳金額
+        500
+        """
+        let s = ParsedStatement.parse(text)
+        XCTAssertEqual(s.closingDate, date(2026, 11, 12, 0))
+        XCTAssertEqual(s.newCharges, 885)
+        XCTAssertEqual(s.amountDue, 885)
+        XCTAssertEqual(s.payments.map(\.amount), [-1000])
+        XCTAssertEqual(s.charges.map(\.amount), [500, -500, 300, 335, 250, 3000, -3000])
+        XCTAssertEqual(s.charges.map(\.name), ["範例餐廳", "範例餐廳", "範例電信", "範例水費", "範例電信", "信用卡年費", "信用卡年費調整"])
+        XCTAssertEqual(s.charges[2].date, date(2026, 10, 20, 0))
+        XCTAssertEqual(s.charges.reduce(0) { $0 + $1.amount }, 885)
+    }
+
     func testParseStatementWithCardColumns() throws {
         let text = """
         信用卡帳單 115年11月
