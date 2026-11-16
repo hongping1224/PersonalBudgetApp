@@ -545,11 +545,29 @@ final class BudgetAppUITests: XCTestCase {
         snapshot("g1-group")
 
         // Folding hides its accounts and keeps the total.
-        group.tap()
+        app.buttons["收合 甲銀行"].tap()
         XCTAssertTrue(app.staticTexts["旅遊"].waitForNonExistence(timeout: 5), "still expanded")
         XCTAssertTrue(app.staticTexts["$3,000"].exists)
-        group.tap()
+        app.buttons["展開 甲銀行"].tap()
         XCTAssertTrue(app.staticTexts["旅遊"].waitForExistence(timeout: 5), "did not expand")
+
+        // Tapping the group opens its page: total, its accounts, and their records.
+        group.tap()
+        let total = app.staticTexts["group-total"]
+        XCTAssertTrue(total.waitForExistence(timeout: 5), "group page did not open")
+        XCTAssertEqual(total.label, "$3,000")
+        XCTAssertTrue(app.staticTexts["薪資"].exists && app.staticTexts["旅遊"].exists, "accounts missing on the group page")
+        snapshot("g2-group-page")
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(group.waitForExistence(timeout: 5))
+
+        // The counting switch sits top left, next to hiding amounts.
+        let mode = app.buttons["balance-mode"]
+        XCTAssertTrue(mode.exists, "no balance mode button in the toolbar")
+        XCTAssertTrue(mode.label.hasPrefix("算到今天"))
+        mode.tap()
+        XCTAssertTrue(app.buttons["balance-mode"].label.hasPrefix("含未來紀錄"))
+        app.buttons["balance-mode"].tap()
 
         // A transfer between long account names keeps its tag on one line.
         addAccount("信用卡繳款專用", group: "很長的銀行名稱", balance: "500")
@@ -765,5 +783,84 @@ final class BudgetAppUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["已對上 (1)"].waitForExistence(timeout: 5), "added record not matched")
         XCTAssertEqual(status.label, "有 1 筆對不上")
         snapshot("s3-added")
+    }
+
+    func testCopyRecordToToday() {
+        addExpense(["1", "2", "0"])
+        app.buttons["明細"].firstMatch.tap()
+        let row = app.buttons["day-entry"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        let copy = app.buttons["複製到今天"]
+        XCTAssertTrue(copy.waitForExistence(timeout: 5), "no copy button on the record")
+        snapshot("c1-editor")
+        copy.tap()
+        XCTAssertTrue(copy.waitForNonExistence(timeout: 5), "editor still open")
+        let rows = app.buttons.matching(identifier: "day-entry")
+        XCTAssertTrue(rows.element(boundBy: 1).waitForExistence(timeout: 5), "copy not added to today")
+        XCTAssertEqual(rows.count, 2)
+    }
+
+    func testCopyBankAccountNumber() {
+        app.buttons["帳戶"].firstMatch.tap()
+        app.buttons["新增帳戶"].tap()
+        let field = app.textFields["名稱，例如 我的信用卡"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap(); field.typeText("薪轉")
+        let code = app.textFields["銀行代碼，例如 812"]
+        XCTAssertTrue(code.waitForExistence(timeout: 3), "no account number fields for a bank")
+        code.tap(); code.typeText("000")
+        let number = app.textFields["帳號"]
+        number.tap(); number.typeText("1234-5678-90")
+        app.buttons["儲存"].firstMatch.tap()
+
+        app.staticTexts["薪轉"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["(000) 1234-5678-90"].waitForExistence(timeout: 5), "account number not shown")
+        let copy = app.buttons["copy-account-number"]
+        copy.tap()
+        XCTAssertTrue(app.buttons["已複製"].waitForExistence(timeout: 2), "no copied feedback")
+        snapshot("n1-account")
+    }
+
+    func testGroupAccountNumber() {
+        func addAccount(_ name: String) {
+            app.buttons["新增帳戶"].tap()
+            let field = app.textFields["名稱，例如 我的信用卡"]
+            XCTAssertTrue(field.waitForExistence(timeout: 5))
+            field.tap(); field.typeText(name)
+            let groupField = app.textFields["銀行或群組"]
+            groupField.tap(); groupField.typeText("甲銀行")
+            app.buttons["儲存"].firstMatch.tap()
+        }
+        app.buttons["帳戶"].firstMatch.tap()
+        addAccount("薪資")
+        addAccount("旅遊")
+
+        app.buttons["group-甲銀行"].tap()
+        let add = app.buttons["新增帳號"]
+        XCTAssertTrue(add.waitForExistence(timeout: 5), "no account number on the group page")
+        add.tap()
+        let code = app.textFields["銀行代碼，例如 812"]
+        XCTAssertTrue(code.waitForExistence(timeout: 5))
+        code.tap(); code.typeText("000")
+        let number = app.textFields["帳號"]
+        number.tap(); number.typeText("1234-5678")
+        app.buttons["儲存"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["(000) 1234-5678"].waitForExistence(timeout: 5), "group number not shown")
+        app.buttons["copy-account-number"].tap()
+        XCTAssertTrue(app.buttons["已複製"].waitForExistence(timeout: 2))
+        snapshot("n2-group")
+
+        // Each account in the group has it too.
+        app.staticTexts["旅遊"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["(000) 1234-5678"].waitForExistence(timeout: 5), "member doesn't share the number")
+        app.navigationBars.buttons.firstMatch.tap()
+        app.navigationBars.buttons.firstMatch.tap()
+
+        // An account added to the group later picks it up.
+        addAccount("緊急預備金")
+        app.swipeUp()
+        app.staticTexts["緊急預備金"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["(000) 1234-5678"].waitForExistence(timeout: 5), "new member didn't get the number")
     }
 }

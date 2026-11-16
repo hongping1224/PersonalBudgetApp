@@ -62,6 +62,9 @@ final class Account {
     var currency: String = "TWD"
     /// Bank or other group this account is listed under with a total; empty = on its own.
     var groupName: String = ""
+    /// Bank accounts: 銀行代碼 and 帳號, for copying when someone pays you or you transfer to it.
+    var bankCode: String = ""
+    var accountNumber: String = ""
     var isArchived: Bool = false
     var sortOrder: Int = 0
     var createdAt: Date = Date()
@@ -107,6 +110,29 @@ final class Account {
 
     /// Balance in TWD at today's rate, for net worth.
     var baseBalance: Double { balance * Currency.rate(currency) }
+
+    /// Balance as of today (records dated after today left out), or with every record.
+    func balance(includeFuture: Bool) -> Double {
+        includeFuture ? balance : balance(upTo: BalanceMode.cutoff())
+    }
+
+    func baseBalance(includeFuture: Bool) -> Double { balance(includeFuture: includeFuture) * Currency.rate(currency) }
+
+    /// Records dated after today, which a balance as of today leaves out.
+    var futureEntryCount: Int {
+        let cutoff = BalanceMode.cutoff()
+        return ((entries ?? []) + (incomingTransfers ?? [])).filter { $0.date >= cutoff }.count
+    }
+}
+
+/// Whether balances count only records up to today (the default) or future-dated ones too.
+enum BalanceMode {
+    static let includeFutureKey = "balanceIncludesFuture"
+
+    /// Start of tomorrow: anything dated today counts, later dates don't.
+    static func cutoff(now: Date = .now, calendar: Calendar = .current) -> Date {
+        calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))!
+    }
 }
 
 /// A row in the 帳戶 list: an account on its own, or a group of them with a total.
@@ -132,11 +158,11 @@ enum AccountListItem: Identifiable {
     }
 
     /// A group's total: in its currency when all its accounts share one, otherwise in TWD.
-    static func total(of accounts: [Account]) -> (amount: Double, currency: String) {
+    static func total(of accounts: [Account], includeFuture: Bool = true) -> (amount: Double, currency: String) {
         if let currency = accounts.first?.currency, accounts.allSatisfy({ $0.currency == currency }) {
-            return (accounts.reduce(0) { $0 + $1.balance }, currency)
+            return (accounts.reduce(0) { $0 + $1.balance(includeFuture: includeFuture) }, currency)
         }
-        return (accounts.reduce(0) { $0 + $1.baseBalance }, Currency.base)
+        return (accounts.reduce(0) { $0 + $1.baseBalance(includeFuture: includeFuture) }, Currency.base)
     }
 }
 

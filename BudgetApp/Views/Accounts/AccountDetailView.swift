@@ -22,6 +22,9 @@ struct AccountDetailView: View {
     @Query private var checks: [BalanceCheck]
     @State private var editingAccount = false
     @State private var editingEntry: Entry?
+    @AppStorage(BalanceMode.includeFutureKey) private var includeFuture = false
+    /// The range end is set once on first appearance, so coming back keeps a range picked by hand.
+    @State private var rangeSet = false
     @State private var from: Date
     @State private var to: Date
 
@@ -93,21 +96,31 @@ struct AccountDetailView: View {
     }
 
     var body: some View {
+        let balance = account.balance(includeFuture: includeFuture)
+        let futureCount = account.futureEntryCount
         ThemedList {
             Section {
                 HStack {
-                    Text("目前餘額")
+                    Text(includeFuture ? "含未來紀錄的餘額" : "目前餘額")
                     Spacer()
-                    Text(Money.string(account.balance, currency: account.currency))
+                    Text(Money.string(balance, currency: account.currency))
                         .font(.title3.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(account.balance >= 0 ? Color.income : Color.expense)
+                        .foregroundStyle(balance >= 0 ? Color.income : Color.expense)
+                }
+                if futureCount > 0 {
+                    BalanceModeRow(includeFuture: $includeFuture, futureCount: futureCount,
+                                   otherAmount: Money.string(account.balance(includeFuture: !includeFuture),
+                                                             currency: account.currency))
+                }
+                if !account.accountNumber.isEmpty {
+                    AccountNumberRow(bankCode: account.bankCode, number: account.accountNumber)
                 }
                 if account.canCheckBalance {
                     checkInRow
                 }
                 if account.type == .creditCard {
                     if let limit = account.creditLimit {
-                        LabeledContent("可用額度", value: Money.string(limit + account.balance, currency: account.currency))
+                        LabeledContent("可用額度", value: Money.string(limit + balance, currency: account.currency))
                     }
                     if let due = account.nextDueDate {
                         LabeledContent("下次繳款", value: due.formatted(date: .abbreviated, time: .omitted))
@@ -174,6 +187,12 @@ struct AccountDetailView: View {
         .toolbar { Button("編輯") { editingAccount = true } }
         .sheet(isPresented: $editingAccount) { AccountEditor(account: account) }
         .sheet(item: $editingEntry) { EntryEditor(entry: $0) }
+        .onAppear {
+            guard !rangeSet else { return }
+            rangeSet = true
+            to = BalanceMode.rangeEnd(includeFuture: includeFuture, entries: allEntries)
+        }
+        .onChange(of: includeFuture) { _, _ in to = BalanceMode.rangeEnd(includeFuture: includeFuture, entries: allEntries) }
     }
 }
 
@@ -188,6 +207,8 @@ struct AccountEditor: View {
     @State private var type: AccountType = .bank
     @State private var currency = Currency.base
     @State private var groupName = ""
+    @State private var bankCode = ""
+    @State private var accountNumber = ""
     @State private var balanceText = ""
     @State private var limitText = ""
     @State private var hasDueDay = false
@@ -235,6 +256,18 @@ struct AccountEditor: View {
                     Text("銀行或群組")
                 } footer: {
                     Text("同類型帳戶填一樣的名字，會排在一起並顯示合計。同一個銀行帳戶裡分開管理的錢，也可以各建一個帳戶放進同一組。")
+                }
+                if type == .bank {
+                    Section {
+                        TextField("銀行代碼，例如 812", text: $bankCode)
+                            .keyboardType(.numberPad)
+                        TextField("帳號", text: $accountNumber)
+                            .keyboardType(.numbersAndPunctuation)
+                    } header: {
+                        Text("銀行帳號")
+                    } footer: {
+                        Text("填了之後，帳戶頁可以一鍵複製帳號，方便別人轉帳給你或轉帳到這個帳戶。")
+                    }
                 }
                 Section {
                     TextField("0", text: $balanceText).keyboardType(.numbersAndPunctuation)
@@ -298,9 +331,11 @@ struct AccountEditor: View {
         guard let account else { return }
         name = account.name
         groupName = account.groupName
+        bankCode = account.bankCode
+        accountNumber = account.accountNumber
         type = account.type
         currency = account.currency
-        balanceText = Money.plain(account.balance)
+        balanceText = Money.plain(account.balance(includeFuture: false))
         limitText = account.creditLimit.map(Money.plain) ?? ""
         hasDueDay = account.paymentDueDay != nil
         dueDay = account.paymentDueDay ?? 1
@@ -318,10 +353,20 @@ struct AccountEditor: View {
         }()
         target.name = name.trimmingCharacters(in: .whitespaces)
         target.groupName = groupName.trimmingCharacters(in: .whitespaces)
+        target.bankCode = bankCode.trimmingCharacters(in: .whitespaces)
+        target.accountNumber = accountNumber.trimmingCharacters(in: .whitespaces)
+        // Joining a bank group without a number of its own: use the group's.
+        if target.accountNumber.isEmpty, type == .bank, !target.groupName.isEmpty,
+           let shared = AccountGroupNumber(of: allAccounts.filter {
+               $0 !== target && $0.type == .bank && $0.groupName == target.groupName
+           }) {
+            target.bankCode = shared.bankCode
+            target.accountNumber = shared.number
+        }
         target.type = type
         if target.entryCount == 0 { target.currency = currency }
         if let wanted = Double(balanceText.replacingOccurrences(of: ",", with: "")) {
-            target.initialBalance += wanted - target.balance
+            target.initialBalance += wanted - target.balance(includeFuture: false)
         }
         target.creditLimit = type == .creditCard ? Double(limitText.replacingOccurrences(of: ",", with: "")) : nil
         target.paymentDueDay = type == .creditCard && hasDueDay ? dueDay : nil

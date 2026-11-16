@@ -14,14 +14,16 @@ struct AccountsView: View {
     @AppStorage("netWorthCollapsed") private var netWorthCollapsed = false
     /// Collapsed account groups, one "type|name" per line.
     @AppStorage("collapsedAccountGroups") private var collapsedGroups = ""
+    @AppStorage(BalanceMode.includeFutureKey) private var includeFuture = false
 
     var body: some View {
         NavigationStack {
             ThemedList {
                 let active = accounts.filter { !$0.isArchived }
-                let balances = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0.balance) })
+                // As of today unless future-dated records are switched on.
+                let balances = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0.balance(includeFuture: includeFuture)) })
                 // Net worth in TWD; foreign-currency accounts at today's rate.
-                let baseBalances = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0.baseBalance) })
+                let baseBalances = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0.baseBalance(includeFuture: includeFuture)) })
                 let assets = active.map { baseBalances[$0.id] ?? 0 }.filter { $0 > 0 }.reduce(0, +)
                 let debts = active.map { baseBalances[$0.id] ?? 0 }.filter { $0 < 0 }.reduce(0, +)
 
@@ -53,6 +55,10 @@ struct AccountsView: View {
                             }
                             .font(.subheadline.monospacedDigit())
                             .foregroundStyle(.secondary)
+                            // Which way balances are counted; switched with the calendar button top left.
+                            Text(includeFuture ? "含未來紀錄" : "算到今天")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
@@ -128,6 +134,13 @@ struct AccountsView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { hideAmounts.toggle() } label: { Image(systemName: hideAmounts ? "eye.slash" : "eye") }
                 }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { includeFuture.toggle() } label: {
+                        Image(systemName: includeFuture ? "calendar.badge.clock" : "calendar")
+                    }
+                    .accessibilityIdentifier("balance-mode")
+                    .accessibilityLabel(includeFuture ? "含未來紀錄，點一下改成只算到今天" : "算到今天，點一下納入未來紀錄")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { AppRouter.shared.showCarrier = true } label: { Image(systemName: "barcode") }
                         .accessibilityLabel("載具條碼")
@@ -155,11 +168,11 @@ struct AccountsView: View {
         checks.contains { $0.accountID == account.id && Calendar.current.isDateInToday($0.date) }
     }
 
-    /// Group header with its total; tap to fold its accounts away.
+    /// Group header with its total: tap for all its records, or the chevron to fold its accounts away.
     private func groupRow(_ name: String, members: [Account], type: AccountType) -> some View {
-        let total = AccountListItem.total(of: members)
+        let total = AccountListItem.total(of: members, includeFuture: includeFuture)
         let collapsed = isCollapsed(name, type: type)
-        return Button { toggleCollapsed(name, type: type) } label: {
+        return NavigationLink { GroupDetailView(name: name, type: type) } label: {
             HStack(spacing: 12) {
                 SymbolBadge(symbol: "folder", color: Color(hex: "#5C6F82"), size: 40)
                 VStack(alignment: .leading, spacing: 2) {
@@ -170,13 +183,18 @@ struct AccountsView: View {
                 Text(mask(Money.string(total.amount, currency: total.currency)))
                     .font(.body.weight(.semibold).monospacedDigit())
                     .foregroundStyle(total.amount >= 0 ? Color.income : Color.expense)
-                Image(systemName: collapsed ? "chevron.right" : "chevron.down")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                // Borderless, so folding doesn't also open the group.
+                Button { withAnimation { toggleCollapsed(name, type: type) } } label: {
+                    Image(systemName: collapsed ? "chevron.down.circle" : "chevron.up.circle")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(collapsed ? "展開 \(name)" : "收合 \(name)")
             }
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
         .accessibilityIdentifier("group-\(name)")
     }
 

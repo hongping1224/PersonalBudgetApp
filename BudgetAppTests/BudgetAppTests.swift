@@ -451,6 +451,38 @@ final class BudgetAppTests: XCTestCase {
         XCTAssertEqual(checks.count, 2)
     }
 
+    func testBalanceUpToToday() throws {
+        let bank = Account(name: "薪資", type: .bank, initialBalance: 1000)
+        let travel = Account(name: "旅遊", type: .bank, initialBalance: 0)
+        [bank, travel].forEach(context.insert)
+        let cal = Calendar.current
+        let laterToday = cal.date(bySettingHour: 23, minute: 30, second: 0, of: .now)!
+        let nextWeek = cal.date(byAdding: .day, value: 7, to: .now)!
+        context.insert(Entry(kind: .expense, amount: 100, date: laterToday, account: bank))
+        context.insert(Entry(kind: .expense, amount: 300, date: nextWeek, account: bank))
+        context.insert(Entry(kind: .transfer, amount: 200, date: nextWeek, account: bank, toAccount: travel))
+        try context.save()
+
+        XCTAssertEqual(bank.balance(includeFuture: false), 900, "today's records count, next week's don't")
+        XCTAssertEqual(bank.balance(includeFuture: true), 400)
+        XCTAssertEqual(bank.futureEntryCount, 2)
+        XCTAssertEqual(travel.balance(includeFuture: false), 0)
+        XCTAssertEqual(travel.futureEntryCount, 1)
+        XCTAssertEqual(AccountListItem.total(of: [bank, travel], includeFuture: false).amount, 900)
+        XCTAssertEqual(AccountListItem.total(of: [bank, travel], includeFuture: true).amount, 600)
+    }
+
+    func testGroupAccountNumber() {
+        let a = Account(name: "薪資", type: .bank), b = Account(name: "旅遊", type: .bank)
+        XCTAssertNil(AccountGroupNumber(of: [a, b]), "no number yet")
+        a.bankCode = "000"; a.accountNumber = "1234-5678"
+        XCTAssertEqual(AccountGroupNumber(of: [a, b])?.number, "1234-5678", "accounts without one don't count")
+        b.accountNumber = "12345678"
+        XCTAssertEqual(AccountGroupNumber(of: [a, b])?.bankCode, "000", "same digits, written differently")
+        b.accountNumber = "999"
+        XCTAssertNil(AccountGroupNumber(of: [a, b]), "different numbers")
+    }
+
     func testAccountGroups() throws {
         let salary = Account(name: "薪資", type: .bank, initialBalance: 1000, sortOrder: 0)
         let wallet = Account(name: "另一間", type: .bank, initialBalance: 50, sortOrder: 1)
@@ -478,9 +510,14 @@ final class BudgetAppTests: XCTestCase {
         XCTAssertEqual(AccountListItem.total(of: [salary, yen]).currency, "TWD")
 
         // Survives a backup round trip.
+        travel.bankCode = "000"
+        travel.accountNumber = "1234-5678"
         let data = try BackupFile.encoder.encode(try BackupFile(context: context))
         try BackupFile.decoder.decode(BackupFile.self, from: data).restore(into: context)
         XCTAssertEqual(try context.fetch(FetchDescriptor<Account>()).first { $0.name == "旅遊" }?.groupName, "甲銀行")
+        let restored = try context.fetch(FetchDescriptor<Account>()).first { $0.name == "旅遊" }
+        XCTAssertEqual(restored?.bankCode, "000")
+        XCTAssertEqual(restored?.accountNumber, "1234-5678")
     }
 
     func testMultiCurrency() throws {
@@ -767,6 +804,38 @@ final class BudgetAppTests: XCTestCase {
         XCTAssertEqual(s.charges.last?.amount, 650, "TWD amount, not the yen")
         XCTAssertEqual(ParsedStatement.date(from: "2026/10/04", near: nil), date(2026, 10, 4, 0))
         XCTAssertEqual(ParsedStatement.date(from: "12/30", near: date(2027, 1, 8)), date(2026, 12, 30, 0))
+    }
+
+    /// 國泰-style: MM/DD dates, card digits and country after the amount, unlabeled 結帳日.
+    func testParseStatementWithCardColumns() throws {
+        let text = """
+        信用卡帳單 115年11月
+        1/3
+        115/11/10
+        115/11/26
+        4,034
+        上期帳單總額 1,000
+        10/11 10/12 範例App轉帳繳款 -1,000
+        繳款小計 -1,000
+        10/11 10/14 範例儲值 300 0000 TW TWD
+        10/22 10/27 範例購物中心 743 0000 1111 TW TWD
+        10/22 11/01 點數折抵＿範例購物中心 -200 0000 TW TWD
+        11/08 11/10 國外交易手續費 -EXAMPL 7 0000
+        11/08 11/09 EXAMPLE.COM 460 0000 1111 SG TWD 460.00 11/07
+        12/30 12/31 跨年範例 100 0000 TW TWD
+        正卡本期消費 1,410
+        本期應繳總額 1,410
+        """
+        let s = ParsedStatement.parse(text)
+        XCTAssertEqual(s.closingDate, date(2026, 11, 10, 0))
+        XCTAssertEqual(s.newCharges, 1410)
+        XCTAssertEqual(s.amountDue, 1410)
+        XCTAssertEqual(s.payments.map(\.amount), [-1000])
+        XCTAssertEqual(s.charges.map(\.amount), [300, 743, -200, 7, 460, 100], "card digits aren't the amount")
+        XCTAssertEqual(s.charges[3].name, "國外交易手續費 -EXAMPL")
+        XCTAssertEqual(s.charges[4].name, "EXAMPLE.COM")
+        XCTAssertEqual(s.charges[0].date, date(2026, 10, 11, 0))
+        XCTAssertEqual(s.charges[5].date, date(2025, 12, 30, 0), "a month after closing is last year's")
     }
 
     func testReconcileStatement() throws {

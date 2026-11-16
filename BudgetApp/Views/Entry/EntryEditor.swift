@@ -145,6 +145,11 @@ struct EntryEditor: View {
                 .accessibilityLabel("拆分")
             }
             if entry != nil {
+                Button(action: copyToToday) {
+                    Image(systemName: "doc.on.doc").frame(width: 44, height: 44)
+                }
+                .disabled(!canSave)
+                .accessibilityLabel("複製到今天")
                 Button(role: .destructive) { showDeleteConfirm = true } label: {
                     Image(systemName: "trash").frame(width: 44, height: 44)
                 }
@@ -501,6 +506,20 @@ struct EntryEditor: View {
             new.setAmount(amount, toAmount: crossCurrency ? toAmount : nil)
             try? context.save()
         }
+        dismiss()
+    }
+
+    /// Records the same thing again dated now, as shown on screen; the original stays as it was saved.
+    private func copyToToday() {
+        guard canSave, let amount = calculator.value else { return }
+        let copy = EntryService.add(kind: kind, amount: amount, date: .now,
+                                    name: name.trimmingCharacters(in: .whitespaces),
+                                    category: kind == .transfer ? nil : category, account: account,
+                                    toAccount: kind == .transfer ? toAccount : nil,
+                                    budget: kind == .transfer ? nil : budget, in: context)
+        copy.setAmount(amount, toAmount: crossCurrency ? toAmount : nil)
+        copy.note = entry?.note ?? ""
+        try? context.save()
         dismiss()
     }
 

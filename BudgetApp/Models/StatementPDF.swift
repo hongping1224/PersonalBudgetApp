@@ -53,9 +53,12 @@ struct ParsedStatement {
     /// 消費日 入帳日 明細 金額 [外幣折算日 消費地 幣別 外幣金額]
     private static let foreignLine = try! NSRegularExpression(pattern:
         "^\(dateToken)\\s+\(dateToken)\\s+(.+?)\\s+\(amountToken)\\s+\(dateToken)\\s+[A-Z]{2}\\s+[A-Z]{3}\\s+[\\d,.]+$")
-    /// 消費日 入帳日 明細 金額 [消費地]
+    /// 消費日 入帳日 明細 金額, then optionally what some banks add after the amount:
+    /// 卡號末四碼 [行動卡號末四碼] 消費國家 幣別 [外幣金額 折算日] (國泰), or just 消費地 (台新).
+    /// The shortest name that leaves a valid tail wins, so numbers after the amount aren't read as it.
     private static let localLine = try! NSRegularExpression(pattern:
-        "^\(dateToken)\\s+\(dateToken)\\s+(.+)\\s+\(amountToken)(?:\\s+[A-Z]{2})?$")
+        "^\(dateToken)\\s+\(dateToken)\\s+(.+?)\\s+\(amountToken)"
+        + "(?:\\s+\\d{4}){0,2}(?:\\s+[A-Z]{2})?(?:\\s+[A-Z]{3})?(?:\\s+[\\d,.]+\\s+\\d{1,2}/\\d{1,2})?$")
 
     static func parse(_ text: String) -> ParsedStatement {
         var result = ParsedStatement()
@@ -73,6 +76,16 @@ struct ParsedStatement {
             if result.amountDue == nil, line.contains("本期累計應繳") || line.contains("本期應繳總額") {
                 result.amountDue = trailingAmount(line)
             }
+        }
+        // 國泰: the dates at the top aren't labeled; the first one is the 結帳日 (the next, 繳款截止日).
+        if result.closingDate == nil,
+           let token = lines.first(where: { $0.range(of: #"^\d{3}/\d{1,2}/\d{1,2}$"#, options: .regularExpression) != nil }) {
+            result.closingDate = date(from: token, near: nil)
+        }
+        // 國泰: 正卡本期消費 (and 附卡本期消費) instead of 本期新增款項.
+        if result.newCharges == nil {
+            let totals = lines.filter { $0.range(of: #"^(正卡|附卡)?本期消費\s+-?[\d,]+$"#, options: .regularExpression) != nil }
+            if !totals.isEmpty { result.newCharges = totals.compactMap(trailingAmount).reduce(0, +) }
         }
 
         for line in lines {
