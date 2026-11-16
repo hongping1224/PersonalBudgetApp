@@ -23,6 +23,7 @@ struct EntryEditor: View {
     @State private var category: EntryCategory?
     @State private var account: Account?
     @State private var toAccount: Account?
+    @AppStorage(BalanceMode.includeFutureKey) private var includeFuture = false
     @State private var budget: Budget?
     @State private var budgetTouched = false
     /// Transfers between currencies: what arrived, typed by hand.
@@ -282,7 +283,16 @@ struct EntryEditor: View {
             HStack {
                 Text(title).foregroundStyle(.secondary)
                 Spacer()
-                Text(selection.wrappedValue?.fullName ?? "選擇帳戶")
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(selection.wrappedValue?.fullName ?? "選擇帳戶")
+                    if let a = selection.wrappedValue {
+                        let balance = a.balance(includeFuture: includeFuture)
+                        Text("餘額 \(Money.string(balance, currency: a.currency))")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(balance < 0 ? Color.expense : .secondary)
+                            .accessibilityIdentifier("\(title)-balance")
+                    }
+                }
                 Image(systemName: "chevron.up.chevron.down").font(.caption)
             }
             .padding()

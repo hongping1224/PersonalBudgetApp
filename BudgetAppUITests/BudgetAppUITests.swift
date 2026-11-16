@@ -663,6 +663,8 @@ final class BudgetAppUITests: XCTestCase {
             to.tap()
             app.buttons["日圓現金"].firstMatch.tap()
         }
+        XCTAssertTrue(to.label.contains("餘額 ¥0"), "to-account balance not shown: \(to.label)")
+        XCTAssertTrue(from.label.contains("餘額"), "from-account balance not shown: \(from.label)")
         press("2", "1", "0", "0")
         let arrived = app.textFields["轉入金額"]
         XCTAssertTrue(arrived.waitForExistence(timeout: 3), "no field for the yen that arrived")
