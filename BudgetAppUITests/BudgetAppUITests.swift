@@ -671,6 +671,9 @@ final class BudgetAppUITests: XCTestCase {
         arrived.tap()
         arrived.typeText("10000")
         snapshot("m1-cross-currency-transfer")
+        // The keyboard pushes the header (and 儲存) up; 完成 must close it.
+        app.buttons["完成"].firstMatch.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3), "keyboard stays up")
         app.buttons["儲存"].firstMatch.tap()
         app.buttons["帳戶"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["¥10,000"].waitForExistence(timeout: 5), "yen balance not updated")

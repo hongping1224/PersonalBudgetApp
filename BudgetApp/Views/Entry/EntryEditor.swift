@@ -39,6 +39,7 @@ struct EntryEditor: View {
     @State private var knownNames: [NameSuggestion] = []
     @State private var recentEntries: [Entry] = []
     @FocusState private var nameFocused: Bool
+    @FocusState private var toAmountFocused: Bool
 
     private var categories: [EntryCategory] {
         allCategories
@@ -76,7 +77,7 @@ struct EntryEditor: View {
                         Button("取消紀錄", role: .cancel) { dismiss() }
                             .tint(Color.expense)
                         Spacer()
-                        Button("完成") { nameFocused = false }.fontWeight(.semibold)
+                        Button("完成") { nameFocused = false; toAmountFocused = false }.fontWeight(.semibold)
                     }
                 }
         }
@@ -215,6 +216,7 @@ struct EntryEditor: View {
                     Spacer()
                     TextField("0", text: $toAmountText)
                         .keyboardType(.decimalPad)
+                        .focused($toAmountFocused)
                         .multilineTextAlignment(.trailing)
                         .font(.title3.weight(.semibold).monospacedDigit())
                         .accessibilityLabel("轉入金額")
